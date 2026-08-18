@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AURA Desktop · Control &amp; Vision</title>
+<link rel="stylesheet" href="css/live.css">
+</head>
+<body>
+<!-- Ambient light field. Pure CSS, GPU-composited, no layout cost. -->
+<div class="ambient" aria-hidden="true">
+  <span class="orb o1"></span><span class="orb o2"></span>
+  <span class="orb o3"></span><span class="orb o4"></span>
+  <div class="grain"></div>
+</div>
+
+<!-- Floating sidebar -->
+<nav class="rail glass" aria-label="Sections">
+  <a class="rail-brand" href="/" title="Back to AURA">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".5"/>
+      <circle cx="12" cy="12" r="4" fill="currentColor"/>
+    </svg>
+  </a>
+  <button class="rail-btn active" data-view="live"    title="Live">◉<i>LIVE</i></button>
+  <button class="rail-btn" data-view="ask"     title="Ask">✦<i>ASK</i></button>
+  <button class="rail-btn" data-view="find"    title="Find">◎<i>FIND</i></button>
+  <button class="rail-btn" data-view="act"     title="Act">➜<i>ACT</i></button>
+  <button class="rail-btn" data-view="desktop" title="Desktop & Windows">▦<i>DESK</i></button>
+  <button class="rail-btn" data-view="trace"   title="Trace">≣<i>TRACE</i></button>
+  <button class="rail-btn" data-view="settings" title="Settings">⚙<i>CONFIG</i></button>
+  <span class="rail-spacer"></span>
+  <button class="rail-btn ghost" id="btn-android" title="Android">▤<i>PHONE</i></button>
+</nav>
+
+<main class="stage">
+  <!-- Floating header -->
+  <header class="topbar glass" role="banner">
+    <div class="brand">
+      <h1>AURA <span>DESKTOP</span></h1>
+      <p id="hero-sub">Desktop awareness &amp; autonomous workspace control</p>
+    </div>
+    <div class="searchwrap glass-in">
+      <span class="s-ico">⌘</span>
+      <input id="omni" type="text" placeholder="Ask about your screen, or type a command…"
+             autocomplete="off" spellcheck="false" aria-label="Command bar">
+      <kbd>↵</kbd>
+    </div>
+    <div class="pillbar">
+      <span class="pill" id="pill-share"><i class="dot"></i>OFF</span>
+      <span class="pill" id="pill-model">—</span>
+      <span class="pill" id="pill-arm"><i class="dot"></i>DISARMED</span>
+    </div>
+  </header>
+
+  <div class="views">
+    <!-- ══════════════ LIVE ══════════════ -->
+    <section class="view active" data-view="live">
+      <div class="grid-hero">
+        <article class="card glass span2 tall" id="card-stage">
+          <div class="card-h">
+            <h2>Shared surface</h2>
+            <div class="row">
+              <button class="gbtn primary" id="btn-share">SHARE SCREEN</button>
+              <button class="gbtn" id="btn-stop" disabled>STOP</button>
+            </div>
+          </div>
+          <div class="screenbox">
+            <canvas id="preview" aria-label="Live preview of the shared surface"></canvas>
+            <div class="empty" id="preview-empty">
+              <div class="empty-ico">◉</div>
+              <h3>Nothing shared yet</h3>
+              <p>Pick a tab, a window, or an entire screen. AURA reads it and can place a
+                 marker on your <em>real</em> desktop.</p>
+              <button class="gbtn primary lg" id="btn-share-2">CHOOSE A SURFACE</button>
+            </div>
+            <div class="scan" aria-hidden="true"></div>
+          </div>
+          <div class="card-f" id="surface-line">No surface selected.</div>
+        </article>
+
+        <article class="card glass" id="card-stats">
+          <div class="card-h"><h2>Signals</h2></div>
+          <div class="stats">
+            <div class="stat"><span class="k">FRAMES</span><span class="v" id="st-frames">0</span></div>
+            <div class="stat"><span class="k">SIZE</span><span class="v" id="st-size">—</span></div>
+            <div class="stat"><span class="k">CLICKABLE</span><span class="v" id="st-click">—</span></div>
+            <div class="stat"><span class="k">READER</span><span class="v sm" id="st-reader">—</span></div>
+          </div>
+          <div class="spark" id="spark" aria-hidden="true"></div>
+          <div class="card-f">Change detection · 1 fps capture</div>
+        </article>
+
+        <article class="card glass" id="card-reticle">
+          <div class="card-h"><h2>Desktop marker</h2>
+            <span class="tag" id="ret-state">idle</span></div>
+          <p class="muted">A real click-through reticle drawn on your desktop — not in this page.</p>
+          <div class="swatches" id="ret-colors" role="group" aria-label="Marker colour"></div>
+          <div class="row wrap">
+            <button class="gbtn" id="btn-ret-test">SHOW AT CURSOR</button>
+            <button class="gbtn ghost" id="btn-ret-off">HIDE</button>
+          </div>
+          <div class="note" id="ret-note"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ══════════════ ASK ══════════════ -->
+    <section class="view" data-view="ask">
+      <div class="grid-2">
+        <article class="card glass tall">
+          <div class="card-h"><h2>Ask about the screen</h2></div>
+          <textarea id="ask-q" class="field" rows="3"
+            placeholder="What does this error mean?"></textarea>
+          <div class="chips" id="ask-presets"></div>
+          <button class="gbtn primary lg wide" id="btn-ask">ASK AURA</button>
+          <div class="answer" id="ask-out"><span class="muted">The answer appears here.</span></div>
+        </article>
+        <article class="card glass">
+          <div class="card-h"><h2>Reading mode</h2></div>
+          <p class="muted">How AURA turns pixels into understanding.</p>
+          <div class="modes" id="mode-picker"></div>
+          <div class="kv"><span>Reader model</span><b id="mode-reader">—</b></div>
+          <div class="kv"><span>Vision models</span><b id="mode-vision">—</b></div>
+          <div class="note">Text questions take the cheap path. Colour, layout and icon
+            questions go to full vision.</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ══════════════ FIND ══════════════ -->
+    <section class="view" data-view="find">
+      <div class="grid-2">
+        <article class="card glass">
+          <div class="card-h"><h2>Locate an element</h2></div>
+          <p class="muted">AURA overlays a 12×8 grid, the model names a cell, and the centre
+            is computed here — models are poor at raw pixels.</p>
+          <input id="find-q" class="field" placeholder="Save button" autocomplete="off">
+          <button class="gbtn primary lg wide" id="btn-find">FIND IT</button>
+          <div class="answer" id="find-out"><span class="muted">No search yet.</span></div>
+          <div class="row wrap">
+            <button class="gbtn" id="btn-here" disabled>CLICK THE MARKER</button>
+          </div>
+        </article>
+        <article class="card glass">
+          <div class="card-h"><h2>Grid</h2><span class="tag" id="grid-cell">—</span></div>
+          <div class="gridmap" id="gridmap" role="img" aria-label="Grid position"></div>
+          <div class="note">Coarse by design. Always verify the marker before clicking.</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ══════════════ ACT ══════════════ -->
+    <section class="view" data-view="act">
+      <div class="grid-2">
+        <article class="card glass tall">
+          <div class="card-h"><h2>Run a task</h2>
+            <span class="tag" id="act-mode">agent</span></div>
+          <p class="muted">One-shot for simple things; the agent loop opens apps and adapts.</p>
+          <div class="seg" id="act-seg">
+            <button data-act="do" class="on">SINGLE STEP</button>
+            <button data-act="task">AGENT LOOP</button>
+          </div>
+          <textarea id="act-q" class="field" rows="3"
+            placeholder="open whatsapp and message Fiona Harris saying Hi"></textarea>
+          <div class="chips" id="act-presets"></div>
+          <button class="gbtn primary lg wide" id="btn-act">EXECUTE</button>
+          <div class="answer" id="act-out"><span class="muted">Nothing run yet.</span></div>
+        </article>
+        <article class="card glass">
+          <div class="card-h"><h2>Automation</h2>
+            <span class="tag" id="auto-state">—</span></div>
+          <div class="kv"><span>Input control</span><b id="auto-avail">—</b></div>
+          <div class="kv"><span>Screen</span><b id="auto-screen">—</b></div>
+          <div class="kv"><span>Expires in</span><b id="auto-exp">—</b></div>
+          <div class="row wrap">
+            <button class="gbtn primary" id="btn-arm">ARM</button>
+            <button class="gbtn ghost" id="btn-disarm">DISARM</button>
+          </div>
+          <div class="warn">Kill switch — slam the pointer into the <b>top-left corner</b>
+            to abort anything running.</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ══════════════ DESKTOPS & ACTIVE WINDOWS ══════════════ -->
+    <section class="view" data-view="desktop">
+      <div class="grid-2">
+        <article class="card glass tall">
+          <div class="card-h">
+            <h2>Active Windows</h2>
+            <div class="row">
+              <span class="tag" id="win-count">0 windows</span>
+              <button class="gbtn ghost" id="btn-win-refresh">REFRESH</button>
+            </div>
+          </div>
+          <p class="muted">Real-time Windows enumeration &amp; window lifecycle manager.</p>
+          <div id="win-list" class="win-list">
+            <span class="muted">Scanning open windows…</span>
+          </div>
+          <div class="card-f" id="win-status">Tracking system window events</div>
+        </article>
+
+        <div class="col gap-hero">
+          <article class="card glass">
+            <div class="card-h"><h2>Virtual Workspaces</h2>
+              <span class="tag" id="vd-os">—</span></div>
+            <p class="muted">Isolate AURA on its own desktop so its windows and actions never conflict with your active apps or cursor.</p>
+            <div class="desks" id="desks"></div>
+            <div class="row wrap">
+              <button class="gbtn primary" id="btn-vd-setup">CREATE AURA DESKTOP</button>
+              <button class="gbtn" id="btn-vd-aura">GO TO AURA</button>
+              <button class="gbtn" id="btn-vd-home">GO HOME</button>
+            </div>
+            <div class="note" id="vd-note"></div>
+          </article>
+
+          <article class="card glass">
+            <div class="card-h"><h2>Reach &amp; Capabilities</h2></div>
+            <div class="reach">
+              <div class="reach-row"><span>🖥 Windows desktop</span><b class="ok" id="reach-win">—</b></div>
+              <div class="reach-row"><span>🎯 Desktop marker</span><b id="reach-ret">—</b></div>
+              <div class="reach-row"><span>⌨ Input control</span><b id="reach-input">—</b></div>
+              <div class="reach-row"><span>📱 Android Companion</span><b class="dim">planned</b></div>
+            </div>
+            <button class="gbtn ghost wide" id="btn-android-2">ANDROID SUPPORT</button>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════ TRACE ══════════════ -->
+    <section class="view" data-view="trace">
+      <article class="card glass tall">
+        <div class="card-h"><h2>Activity trace</h2>
+          <div class="row">
+            <button class="gbtn ghost" id="btn-trace-clear">CLEAR</button>
+          </div></div>
+        <p class="muted">Every model call, decision, coordinate and refusal — as it happens.</p>
+        <div id="trace-log" class="trace-log"></div>
+      </article>
+    </section>
+
+    <!-- ══════════════ SETTINGS ══════════════ -->
+    <section class="view" data-view="settings">
+      <div class="grid-2">
+        <article class="card glass">
+          <div class="card-h"><h2>Vision AI Engine</h2><span class="tag" id="vision-engine-tag">auto</span></div>
+          <p class="muted">Select provider and vision model for reading your screen and visual reasoning.</p>
+          <div class="kv"><span>Vision Provider</span>
+            <select id="sel-vision-provider" class="gselect">
+              <option value="auto">Auto-detect (Recommended)</option>
+              <option value="gemini">Google Gemini (Multimodal)</option>
+              <option value="openai">OpenAI (GPT-4o Vision)</option>
+              <option value="anthropic">Anthropic (Claude 3.5)</option>
+              <option value="openrouter">OpenRouter (Vision)</option>
+              <option value="groq">Groq</option>
+              <option value="ollama">Ollama (Local Offline)</option>
+            </select>
+          </div>
+          <div class="kv"><span>Vision Model</span>
+            <select id="sel-vision-model" class="gselect">
+              <option value="">Default Vision Model</option>
+            </select>
+          </div>
+          <div class="row wrap mt-2">
+            <button class="gbtn primary" id="btn-fetch-vision-models">FETCH VISION MODELS</button>
+          </div>
+          <div class="note" id="vision-model-status">Local Ollama is always kept as a reliable offline fallback.</div>
+        </article>
+
+        <article class="card glass">
+          <div class="card-h"><h2>Capture</h2></div>
+          <label class="tog"><span>Live preview</span>
+            <input type="checkbox" id="tg-preview" checked><i></i></label>
+          <label class="tog"><span>Watch for changes</span>
+            <input type="checkbox" id="tg-watch"><i></i></label>
+          <label class="tog"><span>Ambient lighting</span>
+            <input type="checkbox" id="tg-ambient" checked><i></i></label>
+          <label class="tog"><span>Motion effects</span>
+            <input type="checkbox" id="tg-motion" checked><i></i></label>
+        </article>
+
+        <article class="card glass">
+          <div class="card-h"><h2>Marker</h2></div>
+          <div class="kv"><span>Style</span><b id="set-style">reticle</b></div>
+          <div class="seg" id="style-seg">
+            <button data-style="reticle" class="on">RETICLE</button>
+            <button data-style="ring">RING</button>
+            <button data-style="crosshair">CROSS</button>
+            <button data-style="dot">DOT</button>
+          </div>
+          <div class="kv"><span>Click-through</span><b id="set-ct">—</b></div>
+          <div class="note" id="set-note"></div>
+        </article>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- Morphing modal -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-bg"></div>
+  <div class="modal-card glass" role="dialog" aria-modal="true" aria-labelledby="modal-t">
+    <div class="modal-ico" id="modal-ico">📱</div>
+    <h3 id="modal-t">Android support</h3>
+    <p id="modal-b"></p>
+    <button class="gbtn primary wide" id="modal-x">GOT IT</button>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script type="module" src="js/live.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# ── AURA ──────────────────────────────────────────────────────────────────
+# Test-run artifacts. Every browser suite writes debug screenshots into
+# tests/; they are regenerated on each run and should never be committed.
+tests/*.png
+
+# Release screenshots ARE committed (screenshots/) — they document the UI.
+# Only the throwaway ones above are ignored.
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node — AURA has no build step, but tsc/npx leave these behind.
+node_modules/
+*.tsbuildinfo
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local overrides
+.env
+*.local

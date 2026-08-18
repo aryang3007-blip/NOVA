@@ -1,0 +1,473 @@
+{
+  "version": "1.0.0",
+  "codename": "NOVA Cognitive Assistant",
+  "date": "2026-08-15",
+  "assertions": 3500,
+  "releases": [
+    {
+      "version": "1.0.0",
+      "codename": "NOVA Cognitive Assistant",
+      "date": "2026-08-15",
+      "headline": "A human-like desktop AI assistant with Cognitive Orchestrator, Device Awareness, and Android Companion",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**Cognitive Orchestrator & Natural Intent Processing**: Replaces rigid slash commands with natural semantic intent routing."
+        },
+        {
+          "kind": "feature",
+          "text": "**Device Awareness & Transport Engine**: Target execution across Desktop and Paired Android Companion over local network."
+        },
+        {
+          "kind": "feature",
+          "text": "**Human-like 5-Tier Memory**: Selective short-term, long-term, user preferences, episodic, and semantic memory."
+        }
+      ]
+    },
+    {
+      "version": "0.22.0",
+      "codename": "Golden Core",
+      "date": "2026-08-14",
+      "headline": "A golden AI sphere that shows what the agent is really doing",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**The AI Sphere.** A canvas-rendered golden energy core \u2014 orbital rings, particle shell, energy bands, glowing centre. It is the new default avatar and the product's identity."
+        },
+        {
+          "kind": "feature",
+          "text": "**Nine agent states, driven by real events**: idle, listening, thinking, planning, executing, success, error, connecting, connected. Measured as visually distinct \u2014 `success` nearly triples the lit pixels, `error` shifts hot and unstable, `connecting` sweeps a scan bar. Every one is wired to an actual subsystem event, never a timer."
+        },
+        {
+          "kind": "feature",
+          "text": "**Command Gold theme** \u2014 near-black (#050505) with a warm gold accent, now the default. Backgrounds stay neutral black on purpose: a warm background plus a warm accent muddies both."
+        },
+        {
+          "kind": "feature",
+          "text": "**Task cards** (spec \u00a717/\u00a719/\u00a764/\u00a773): the command echoed back, a numbered plan that ticks off as steps complete, a progress bar fed by real trace steps, CANCEL, and generated files surfaced with an OPEN button."
+        },
+        {
+          "kind": "safety",
+          "text": "Progress can never reach 100% while a task is still running, and a cancelled task can never report success \u2014 `Trace.end()` downgrades it even if the caller passes 'ok'. Cancellation is honest about being cooperative: the button reads STOPPING\u2026 because a native call already in flight cannot be killed."
+        },
+        {
+          "kind": "fix",
+          "text": "The sphere first rendered into a **1x1 canvas** stretched across the stage: `init()` measured the container before layout. A ResizeObserver now tracks the host, and a zero measurement is ignored rather than clamped to 1px."
+        },
+        {
+          "kind": "note",
+          "text": "The humanoid avatar is unchanged and one click away in Settings \u2192 Avatar. Kept AURA's vanilla-JS + Python-stdlib stack \u2014 no build step, still offline-first, all existing tests still passing."
+        }
+      ]
+    },
+    {
+      "version": "0.21.0",
+      "codename": "Artifact",
+      "date": "2026-08-12",
+      "headline": "AURA now makes real files \u2014 and pairing is a QR scan",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**`/doc ppt on quantum computing`** \u2014 genuine `.pptx`, `.xlsx` and `.docx` files, not text pretending to be Office documents. Verified as valid OOXML packages containing `ppt/presentation.xml`, `xl/workbook.xml` and `word/document.xml`."
+        },
+        {
+          "kind": "feature",
+          "text": "Works with **whatever model you have**: Gemini, OpenRouter or local Ollama \u2014 same provider the chat already uses. With no model at all it still writes a real, correctly-formatted skeleton and says on the title slide that no model was involved."
+        },
+        {
+          "kind": "feature",
+          "text": "**`/organize`** sorts a folder into Images, Documents, Archives\u2026 It **previews first and moves nothing** until you confirm, refuses a stale or replayed plan, and journals every run so `/organize undo` puts all of it back."
+        },
+        {
+          "kind": "feature",
+          "text": "**QR pairing.** Settings \u2192 Devices shows a scannable code; the phone opens the right LAN URL with the 6 digits already filled in. Proven by screenshotting the rendered QR and decoding it with OpenCV \u2014 not by eye."
+        },
+        {
+          "kind": "feature",
+          "text": "A **configurable save folder** for generated files, defaulting to `Downloads/AURA`. Whatever you type is still path-jailed server-side."
+        },
+        {
+          "kind": "safety",
+          "text": "The AI writes **content only, never paths**. It returns an outline; a separate Python module renders it. Spreadsheet cells starting `=`, `+`, `-` or `@` are prefixed so a generated sheet cannot become a formula-injection payload. Extensions are forced to match the type, so a 'presentation' can never be written as `.exe`."
+        },
+        {
+          "kind": "note",
+          "text": "Smart-home stays dropped, as you asked. Screen analysis, camera vision, browser automation, messaging and sequential automation were already built \u2014 usually deeper (grid-grounded clicking, a 14-step agent loop)."
+        }
+      ]
+    },
+    {
+      "version": "0.20.1",
+      "codename": "Reach",
+      "date": "2026-08-11",
+      "headline": "Four bugs you found on Windows \u2014 all four fixed",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**The companion page no longer assumes you are a phone.** Pick Android / iPhone / Windows / macOS / Linux, or press **AUTO-DETECT**. Capabilities, the default name and the wording all follow the choice \u2014 a Windows companion is never offered `vibrate`, and neither is iOS, because Safari has no Vibration API."
+        },
+        {
+          "kind": "fix",
+          "text": "**Settings \u2192 Devices did not exist.** The phone page told you to open it; it was never built \u2014 pairing was only reachable via the `/devices` chat command. There is now a real DEVICES tab with the code, a live countdown, the companion URL, and the paired-device list with unpair."
+        },
+        {
+          "kind": "fix",
+          "text": "**The settings tab strip was being crushed, not hidden.** `.tabs` is a flex child and had the default `flex-shrink:1`, so a long tab (DESKTOP, ABOUT) squeezed it from 26px to 12\u201317px. Now `flex:none`, and switching tabs returns you to the top."
+        },
+        {
+          "kind": "fix",
+          "text": "**The mic on/off loop on first login.** The restart-storm guard defeated itself: it counted a failure as a gap under 900ms between attempts, but its own backoff grew that gap to 1060ms, so the counter reset every third try and never reached its limit. It now judges how long recognition actually RAN and counts consecutive failures \u2014 a dead mic stops in about 7 seconds, a healthy one is never shut off."
+        },
+        {
+          "kind": "note",
+          "text": "The storm guard was extracted into a pure `decideRestart()` so it is unit-testable without a browser recogniser. 7 new assertions lock the exact regression down."
+        }
+      ]
+    },
+    {
+      "version": "0.20.0",
+      "codename": "Reach",
+      "date": "2026-08-11",
+      "headline": "Hold a finger still and it clicks \u2014 plus the overlapping-text bug is gone",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**Dwell-to-click.** Point at something and hold still. A ring fills 0 \u2192 25 \u2192 50 \u2192 75 \u2192 100% on the camera overlay, then clicks. The last deferred item from the spec (\u00a74/\u00a75) is now built."
+        },
+        {
+          "kind": "feature",
+          "text": "The ring is **colour-coded by what a completed hold will actually do**: blue for one of AURA's own controls, yellow for the Windows desktop, red when the desktop is blocked. You know the outcome before it happens."
+        },
+        {
+          "kind": "safety",
+          "text": "**New `Vision Mouse Control` permission.** Clicking AURA's own buttons needs nothing \u2014 it is your own page. Clicking your *desktop* needs the permission AND a full-monitor share AND an armed bridge. All three refuse out loud, never silently."
+        },
+        {
+          "kind": "fix",
+          "text": "**The Privacy Guard text really was overlapping the camera logs.** `#trace-log` was an in-flow child of `.panels` while every panel is `position:absolute` with a transparent background \u2014 two text layers on the same pixels. The trace now lives in its own opaque dock that takes real space. A new detector, `tests/find-overlaps.py`, found 240 collisions across 3 viewports and now reports **0**."
+        },
+        {
+          "kind": "fix",
+          "text": "**ENABLE CAMERA was being cut off** at 1280x800 \u2014 the placeholder is taller than the 4:3 box and was clipped. Same bug on `/screen`'s CHOOSE A SURFACE. Both scroll now instead of hiding their own button."
+        },
+        {
+          "kind": "fix",
+          "text": "Bug #102: a motionless hand fired **3 clicks in 5 seconds**. The cooldown was time-OR-distance; it must be time-AND-distance. Caught by the unit tests before it ever shipped."
+        },
+        {
+          "kind": "fix",
+          "text": "Bug #103: the ring flashed **0%** at the exact instant it should read a satisfying 100%, because the controller zeroes progress for the cooldown on the firing tick."
+        },
+        {
+          "kind": "note",
+          "text": "Desktop clicks cannot be exercised here \u2014 this sandbox has no display and no pyautogui, so that path reports the bridge's real refusal. The web-click path is proven end-to-end: a dwell on a real button really fires its handler."
+        }
+      ]
+    },
+    {
+      "version": "0.19.0",
+      "codename": "Companion",
+      "date": "2026-08-07",
+      "headline": "Pair your phone, fix AURA Live, and see your face being scanned",
+      "changes": [
+        {
+          "kind": "fix",
+          "text": "**AURA Live was broken by my typo.** `js/live.js` called `resolveProvider?.()` \u2014 the method is `resolve()`. Optional chaining made it a silent no-op, so the page never connected to a model. Fixed and the `?.` removed so it fails loudly next time."
+        },
+        {
+          "kind": "feature",
+          "text": "**Face enrolment visuals** \u2014 a sweeping scan bar, dense mesh and live % ring on your face. Also fixed: enrolment was gated on a setting that is off by default, so `addSample()` never ran and progress genuinely sat at 0."
+        },
+        {
+          "kind": "feature",
+          "text": "**Device Gateway** \u2014 pair a phone at `/phone` over the LAN. 6-digit single-use code, device token, heartbeat, long-poll transport, auto-reconnect. Measured 7\u201317 ms latency."
+        },
+        {
+          "kind": "feature",
+          "text": "\"Open YouTube on my phone\" routes to the phone; \"on my laptop\" executes here. An offline phone says so \u2014 it never fakes success."
+        },
+        {
+          "kind": "safety",
+          "text": "A phone has **no route that runs anything on Windows**. Host routes need the host token, device routes need the device token, capabilities are allowlisted at pairing. All three verified as 401 over real HTTP."
+        },
+        {
+          "kind": "note",
+          "text": "Phone camera over LAN HTTP is blocked by the browser's insecure-context rule. The page now reports exactly that, lists the three real fixes, and does not pretend otherwise."
+        }
+      ]
+    },
+    {
+      "version": "0.18.1",
+      "codename": "Owner Aware",
+      "date": "2026-08-07",
+      "headline": "Privacy Guard no longer hides your screen from you",
+      "changes": [
+        {
+          "kind": "fix",
+          "text": "**Reported failure: it minimised when shown the owner's own face.** v1 gated on face SIZE only, and the biggest face at a laptop is always you. Now requires **2+ faces** and stands down when every recognised face is enrolled."
+        },
+        {
+          "kind": "feature",
+          "text": "`_identifyAll()` recognises every face in frame (not just the first, which existed for greetings), so the guard can ask *is anyone here NOT enrolled?*"
+        },
+        {
+          "kind": "feature",
+          "text": "UI shows faces in frame, who was recognised, and the live stand-down reason. Both new rules are configurable; `minFaces: 1` restores the old behaviour deliberately."
+        },
+        {
+          "kind": "feature",
+          "text": "**AURA Live toggle** \u2014 Settings \u2192 Vision. Hides the dock entry only; `/screen` and all its code stay intact and re-enabling restores it unchanged."
+        },
+        {
+          "kind": "note",
+          "text": "Android companion, dwell-to-click and the device gateway are NOT in this release \u2014 see the notes. I would rather ship the fix than a half-built device layer."
+        }
+      ]
+    },
+    {
+      "version": "0.18.0",
+      "codename": "Privacy Guard",
+      "date": "2026-08-07",
+      "headline": "Minimise the screen when someone appears behind you \u2014 local, instant, permission-gated",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**Privacy Guard** \u2014 reuses the existing camera pipeline to detect a person behind you and minimise the focused window. No LLM, no screenshot, no network. Off by default, conservative by default."
+        },
+        {
+          "kind": "feature",
+          "text": "`windows_mgr.py` \u2014 minimises via `user32.ShowWindow(hwnd, SW_MINIMIZE)`. **No screen coordinates**, no window titles, no app names."
+        },
+        {
+          "kind": "safety",
+          "text": "Vision cannot act alone: the guard proposes `desktop.minimize_active_window` and the Runtime's permission gate decides. It never auto-restores \u2014 there is no restore command in the registry."
+        },
+        {
+          "kind": "fix",
+          "text": "**Cooldown could be bypassed.** It compared event timestamps, which can arrive out of order \u2014 a stale burst re-fired the minimise 3 times. Now uses wall clock. Verified: 1 trigger, 20 suppressed."
+        },
+        {
+          "kind": "fix",
+          "text": "**Object detection diagnosed.** Not broken \u2014 `scoreThreshold: 0.42` was too high. Measured best score on a live frame: 0.453. Lowered to 0.28; detections now land at 0.32\u20130.675."
+        }
+      ]
+    },
+    {
+      "version": "0.17.0",
+      "codename": "AURA Live",
+      "date": "2026-08-07",
+      "headline": "Screen control is now a full page at /screen, with a UI for every command",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**`/screen`** \u2014 AURA Live. Everything screen-related in one place: share, ask, find, act, desktops, trace, settings. The dock button now navigates here."
+        },
+        {
+          "kind": "feature",
+          "text": "Every slash command has a real control \u2014 `/find` gets a live 12\u00d78 grid map, `/reticle` gets colour and style pickers, `/do` and `/task` share a segmented control, `/automation` shows a live expiry countdown."
+        },
+        {
+          "kind": "feature",
+          "text": "Glassmorphism UI: layered frosted panels, ambient gradient light, cursor-tracked reflections, spring easing, ripple clicks, blur-morph transitions, shimmer skeletons. Transform/opacity only \u2014 no layout thrash."
+        },
+        {
+          "kind": "feature",
+          "text": "Android button opens an honest \"under development\" modal explaining the ADB/scrcpy plan. It does not imply a hidden feature."
+        },
+        {
+          "kind": "fix",
+          "text": "Removed 10 dangling DOM references left in `main.js` after the old sidebar panel was deleted \u2014 caught by the architecture test."
+        },
+        {
+          "kind": "note",
+          "text": "Slash commands are unchanged and still work in the main app. The page imports the same modules, so there is one source of truth."
+        }
+      ]
+    },
+    {
+      "version": "0.16.0",
+      "codename": "Real Reticle",
+      "date": "2026-08-07",
+      "headline": "AURA's cursor is now actually on your screen \u2014 the old one never was",
+      "changes": [
+        {
+          "kind": "fix",
+          "text": "**Correction.** \"AURA places its own cursor on your screen\" was false. The reticle only ever existed inside the SCREEN panel's preview canvas \u2014 a circle drawn on a *picture* of your screen. You were right to say you had never seen it."
+        },
+        {
+          "kind": "feature",
+          "text": "`overlay.py` \u2014 a real click-through, always-on-top desktop reticle. On Windows it uses `WS_EX_TRANSPARENT` so clicks pass through it. Proven by pixel count under Xvfb: 2392 green pixels shown, 0 hidden."
+        },
+        {
+          "kind": "feature",
+          "text": "`/reticle test` puts the marker on your desktop right now. `/find` places it automatically."
+        },
+        {
+          "kind": "feature",
+          "text": "`vdesk.py` + `/desktop setup` \u2014 give AURA its own Windows 11 virtual desktop, your idea. Uses documented Win+Ctrl shortcuts, not the undocumented COM API that breaks on every Windows update."
+        },
+        {
+          "kind": "note",
+          "text": "Windows has ONE pointer shared across desktops. Separate desktops keep AURA's windows off your workspace; they do not give it a second mouse."
+        }
+      ]
+    },
+    {
+      "version": "0.15.0",
+      "codename": "Runtime Kernel",
+      "date": "2026-08-07",
+      "headline": "The Runtime owns execution. The AI proposes; it never touches the OS.",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**Command Registry** \u2014 32 namespaced commands (`desktop.launch_app`, `input.click`, `vision.locate`\u2026), each with a schema, risk level and required permission. The AI may only pick from this list; an invented name is rejected before the Runtime sees it."
+        },
+        {
+          "kind": "feature",
+          "text": "**Runtime Kernel** \u2014 one entry point, five ordered gates: registry \u2192 permission \u2192 precondition \u2192 confirm \u2192 execute. Skipping a stage is not possible from outside."
+        },
+        {
+          "kind": "feature",
+          "text": "**Desktop World Model** \u2014 persistent state (apps, running processes, screen geometry, last observation, action history) with explicit staleness, so AURA stops rediscovering the machine every step."
+        },
+        {
+          "kind": "feature",
+          "text": "**Desktop Knowledge Base** \u2014 WhatsApp uses Ctrl+F, Slack uses Ctrl+K, macOS close is top-LEFT. Injected as prompt hints so the model spends its judgement on *where things are*, not on rediscovering shortcuts."
+        },
+        {
+          "kind": "feature",
+          "text": "**Developer Console** (`DEV` in the dock) \u2014 live pipeline diagram, runtime stats, world model, command availability with reasons, full event stream and logs, with filtering and pause."
+        },
+        {
+          "kind": "fix",
+          "text": "Caught while wiring: `this.runtime` already meant LocalRuntime. The kernel is `this.kernel` \u2014 overwriting it would have silently broken the OPS panel."
+        },
+        {
+          "kind": "note",
+          "text": "`/task`, `/do`, `/watch`, plugins, gestures, voice, avatar, memory and Ollama routing all unchanged. 69 commands still registered."
+        }
+      ]
+    },
+    {
+      "version": "0.14.0",
+      "codename": "Task Agent",
+      "date": "2026-08-07",
+      "headline": "Multi-step agent loop: /task can open an app it cannot see yet",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "`/task <goal>` \u2014 observe \u2192 act \u2192 observe loop. Takes a fresh screenshot after every action, so it can open an app, wait for it, find a search box, type a name and continue. `/do` stays as the fast single-shot path."
+        },
+        {
+          "kind": "feature",
+          "text": "`running_apps` bridge action (psutil) so the agent knows what is already open instead of guessing from a screenshot."
+        },
+        {
+          "kind": "feature",
+          "text": "`/dev` page \u2014 this page. Version, release notes, and live build status."
+        },
+        {
+          "kind": "safety",
+          "text": "Hard ceiling of 14 iterations, every step previewed and confirmed, agent must declare done/fail. No gate was weakened."
+        },
+        {
+          "kind": "note",
+          "text": "A 7B local model misreads UI regularly. This is assistive, not unattended."
+        }
+      ]
+    },
+    {
+      "version": "0.13.0",
+      "codename": "Messy JSON",
+      "date": "2026-08-07",
+      "headline": "/do actually works \u2014 the parser was the bug",
+      "changes": [
+        {
+          "kind": "fix",
+          "text": "`AbortError: BodyStreamBuffer was aborted` on every Stop. `reader.cancel()` returns a Promise that rejects on an aborted body; `try/catch` cannot catch that. Now `.catch()`-ed."
+        },
+        {
+          "kind": "fix",
+          "text": "`extractJson()` handled 2 of 5 realistic model replies. Rewritten as strict \u2192 repair \u2192 prose-salvage; now 9 of 9."
+        },
+        {
+          "kind": "feature",
+          "text": "Deterministic shortcuts: `/do close the open window` resolves in 20 ms with no model call."
+        },
+        {
+          "kind": "feature",
+          "text": "Two-stage describe \u2192 plan fallback for weak vision models."
+        }
+      ]
+    },
+    {
+      "version": "0.12.0",
+      "codename": "Right Model",
+      "date": "2026-08-07",
+      "headline": "moondream demoted; direct vision planning",
+      "changes": [
+        {
+          "kind": "fix",
+          "text": "A 1.7B captioner was being auto-selected as the CHAT model because it was smallest. Vision models under 3B are now excluded from auto-routing."
+        },
+        {
+          "kind": "fix",
+          "text": "OCR preferred the smallest model; now ordered by reading quality."
+        },
+        {
+          "kind": "feature",
+          "text": "`/do` plans directly from the screenshot instead of image \u2192 OCR \u2192 text \u2192 plan."
+        },
+        {
+          "kind": "feature",
+          "text": "Avatar height slider (60\u2013160%) in WARDROBE."
+        }
+      ]
+    },
+    {
+      "version": "0.11.0",
+      "codename": "Own Cursor",
+      "date": "2026-08-07",
+      "headline": "AURA's own reticle, activity trace, swipe gestures",
+      "changes": [
+        {
+          "kind": "fix",
+          "text": "`/watch` never moved a cursor; `/find` moved the real OS pointer and fought the user for it."
+        },
+        {
+          "kind": "fix",
+          "text": "Automation expired after 15 min of wall clock. Now a 60 min rolling idle window."
+        },
+        {
+          "kind": "feature",
+          "text": "Activity trace \u2014 every model call, decision, coordinate and refusal, live."
+        },
+        {
+          "kind": "feature",
+          "text": "Swipe gestures + three-finger salute for Settings."
+        }
+      ]
+    },
+    {
+      "version": "0.10.0",
+      "codename": "Screen Aware",
+      "date": "2026-08-07",
+      "headline": "Copilot-Vision-style screen sharing and the command palette",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "`/watch` \u2014 share a tab, window or screen and ask about it."
+        },
+        {
+          "kind": "feature",
+          "text": "Command palette: type `/` or `@` for a live filtered list."
+        },
+        {
+          "kind": "feature",
+          "text": "Grid-based coordinate grounding, because models cannot name pixels."
+        }
+      ]
+    }
+  ],
+  "headline": "Runtime-centric architecture"
+}

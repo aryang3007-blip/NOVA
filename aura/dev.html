@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURA · Dev</title>
+<style>
+  :root{
+    --accent:#38bdf8; --accent-rgb:56,189,248; --bg-0:#06080d; --bg-1:#0a0e16;
+    --bg-2:#0f1420; --text:#e8eef5; --dim:#7d8da3; --ok:#34d399; --warn:#ffb020;
+    --danger:#ff5470; --brd:rgba(148,175,205,.12); --hair:rgba(148,175,205,.07);
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    --font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--bg-0);color:var(--text);font-family:var(--font);
+    line-height:1.55;
+    background-image:radial-gradient(1000px 500px at 15% -10%,rgba(var(--accent-rgb),.09),transparent 60%);
+  }
+  .wrap{max-width:920px;margin:0 auto;padding:2.4rem 1.4rem 5rem}
+  header{display:flex;align-items:baseline;gap:.9rem;flex-wrap:wrap;
+         padding-bottom:1rem;border-bottom:1px solid var(--brd)}
+  h1{font-size:1.5rem;letter-spacing:.24em;margin:0;font-weight:600}
+  h1 small{display:block;font-size:.56rem;letter-spacing:.3em;color:var(--dim);
+           font-weight:400;margin-top:.25rem}
+  .ver{font-family:var(--mono);font-size:1.05rem;color:var(--accent)}
+  .code{font-family:var(--mono);font-size:.72rem;color:var(--dim)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+        gap:.7rem;margin:1.4rem 0}
+  .card{background:var(--bg-1);border:1px solid var(--brd);border-radius:12px;padding:.8rem .9rem}
+  .card .k{font-family:var(--mono);font-size:.55rem;letter-spacing:.14em;color:var(--dim)}
+  .card .v{font-size:1.15rem;margin-top:.25rem;font-family:var(--mono)}
+  .v.ok{color:var(--ok)} .v.warn{color:var(--warn)} .v.bad{color:var(--danger)}
+  h2{font-size:.62rem;letter-spacing:.24em;color:var(--dim);font-weight:600;
+     margin:2.4rem 0 .9rem;text-transform:uppercase}
+  .rel{background:var(--bg-1);border:1px solid var(--brd);border-radius:14px;
+       margin-bottom:.9rem;overflow:hidden}
+  .rel-h{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;
+         padding:.8rem 1rem;border-bottom:1px solid var(--hair);cursor:pointer;
+         user-select:none}
+  .rel-h:hover{background:rgba(var(--accent-rgb),.04)}
+  .tag{font-family:var(--mono);font-size:.72rem;color:var(--accent);
+       background:rgba(var(--accent-rgb),.1);padding:.15rem .5rem;border-radius:6px}
+  .rel-name{font-weight:600}
+  .rel-date{margin-left:auto;font-family:var(--mono);font-size:.62rem;color:var(--dim)}
+  .rel-head{padding:.15rem 1rem .1rem;color:var(--dim);font-size:.86rem}
+  .rel-b{padding:.5rem 1rem 1rem}
+  li{margin:.42rem 0;font-size:.9rem}
+  ul{padding-left:1.1rem;margin:.4rem 0}
+  /* inline-block, not inline: an inline badge sits in the same line box as a
+     wrapping <code> and the two paint over each other (caught by
+     tests/find-overlaps.py). inline-block gives it its own box. */
+  .kind{display:inline-block;font-family:var(--mono);font-size:.5rem;
+        letter-spacing:.1em;padding:.1rem .38rem;border-radius:4px;
+        margin-right:.45rem;vertical-align:.1em;text-transform:uppercase;
+        white-space:nowrap}
+  code{overflow-wrap:anywhere}
+  .kind.feature{background:rgba(52,211,153,.14);color:var(--ok)}
+  .kind.fix{background:rgba(255,84,112,.14);color:var(--danger)}
+  .kind.safety{background:rgba(255,176,32,.14);color:var(--warn)}
+  .kind.note{background:rgba(125,141,163,.14);color:var(--dim)}
+  code{font-family:var(--mono);font-size:.83em;background:var(--bg-2);
+       padding:.1rem .34rem;border-radius:4px;color:var(--accent)}
+  a{color:var(--accent)}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--brd);
+        font-size:.76rem;color:var(--dim)}
+  .collapsed .rel-b,.collapsed .rel-head{display:none}
+  .chev{color:var(--dim);font-size:.7rem;transition:transform .15s}
+  .collapsed .chev{transform:rotate(-90deg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AURA <small>Adaptive Unified Response Assistant</small></h1>
+    <span class="ver" id="ver">…</span>
+    <span class="code" id="codename"></span>
+  </header>
+
+  <div class="grid" id="status"></div>
+
+  <h2>Release notes</h2>
+  <div id="releases"></div>
+
+  <div class="foot">
+    Served by <code>serve.py</code> from <code>VERSION.json</code>.
+    <a href="/">← back to AURA</a>
+  </div>
+</div>
+
+<script>
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// Render `backtick code` spans without allowing any other markup through.
+function md(s) {
+  return esc(s).replace(/`([^`]+)`/g, (_, m) => `<code>${m}</code>`);
+}
+
+function card(k, v, cls = '') {
+  return `<div class="card"><div class="k">${esc(k)}</div>
+          <div class="v ${cls}">${esc(v)}</div></div>`;
+}
+
+fetch('/api/version', { cache: 'no-store' })
+  .then(r => r.json())
+  .then(d => {
+    if (!d.ok) throw new Error(d.message || 'no version data');
+    document.getElementById('ver').textContent = 'v' + d.version;
+    document.getElementById('codename').textContent = '“' + (d.codename || '') + '”';
+    document.title = `AURA v${d.version} · Dev`;
+
+    const ol = d.ollama || {};
+    document.getElementById('status').innerHTML =
+        card('RELEASED', d.date || '—')
+      + card('ASSERTIONS', d.assertions ?? '—', 'ok')
+      + card('PLATFORM', d.os || 'unknown')
+      + card('DESKTOP ACTIONS', d.actionsEnabled ? 'ENABLED' : 'disabled',
+             d.actionsEnabled ? 'ok' : 'warn')
+      + card('OLLAMA', ol.running ? `${(ol.models || []).length} models` : 'not running',
+             ol.running ? 'ok' : 'warn');
+
+    document.getElementById('releases').innerHTML = (d.releases || []).map((r, i) => `
+      <div class="rel ${i ? 'collapsed' : ''}">
+        <div class="rel-h">
+          <span class="chev">▼</span>
+          <span class="tag">v${esc(r.version)}</span>
+          <span class="rel-name">${esc(r.codename || '')}</span>
+          <span class="rel-date">${esc(r.date || '')}</span>
+        </div>
+        <div class="rel-head">${md(r.headline || '')}</div>
+        <div class="rel-b"><ul>${(r.changes || []).map(c =>
+          `<li><span class="kind ${esc(c.kind || 'note')}">${esc(c.kind || 'note')}</span>${md(c.text)}</li>`
+        ).join('')}</ul></div>
+      </div>`).join('');
+
+    document.querySelectorAll('.rel-h').forEach(h =>
+      h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed')));
+  })
+  .catch(e => {
+    document.getElementById('status').innerHTML =
+      `<div class="card"><div class="k">ERROR</div><div class="v bad">${esc(e.message)}</div></div>`;
+  });
+</script>
+</body>
+</html>

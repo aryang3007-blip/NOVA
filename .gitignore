@@ -1,0 +1,20 @@
+# Local/system files
+.local/
+.sudo_as_admin_successful
+')
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+
+# Environment/secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/

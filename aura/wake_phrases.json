@@ -1,0 +1,25 @@
+{
+    "enabled": true,
+    "phrases": [
+        {
+            "name": "Hey Nova",
+            "phrase": "hey nova",
+            "enabled": true
+        },
+        {
+            "name": "Yo Nova",
+            "phrase": "yo nova",
+            "enabled": true
+        },
+        {
+            "name": "Nova",
+            "phrase": "nova",
+            "enabled": true
+        },
+        {
+            "name": "Okay Nova",
+            "phrase": "okay nova",
+            "enabled": true
+        }
+    ]
+}

@@ -1,0 +1,35 @@
+# AURA — optional Python dependencies
+#
+# AURA runs with NONE of these: serve.py needs only the standard library.
+# Each unlocks one feature, and AURA says plainly when one is missing rather
+# than pretending the feature works.
+
+# System telemetry for the OPS panel (CPU/RAM/disk).
+psutil>=5.9
+
+# Web research: search without an API key, then read the pages.
+#   /search  ->  ddgs  ->  trafilatura  ->  your local Ollama model
+ddgs>=9.0
+trafilatura>=1.6
+
+# Input automation: lets AURA move the mouse and type for you.
+# HIGH RISK — off by default, must be armed in Settings, and every plan is
+# previewed before it runs. Omit this line if you don't want the capability
+# on the machine at all.
+pyautogui>=0.9.54
+
+# Screenshot support on Linux for pyautogui (Windows/macOS need nothing extra).
+# python3-xlib; sys_platform == 'linux'
+
+# Document generation. Each format is independent — install only what you want.
+# AURA reports exactly which one is missing rather than writing a fake file.
+#   /doc ppt on <topic>     -> python-pptx
+#   /doc sheet of <topic>   -> openpyxl
+#   /doc report on <topic>  -> python-docx
+python-pptx>=0.6.21
+openpyxl>=3.1
+python-docx>=1.1
+
+# QR code for phone pairing: scan instead of typing six digits.
+# Without it the 6-digit code still works; the QR simply does not appear.
+qrcode>=7.4

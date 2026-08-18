@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05060a">
+<title>AURA Companion</title>
+<style>
+  :root{
+    --bg:#05060a; --ink:#eaf0f7; --dim:rgba(234,240,247,.6); --faint:rgba(234,240,247,.35);
+    --cy:#4fd6ff; --pu:#a98bff; --gr:#4ef2a7; --am:#ffc46b; --rd:#ff6b81;
+    --edge:rgba(255,255,255,.11);
+    --mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+    --font:-apple-system,'Segoe UI',Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;min-height:100dvh;background:var(--bg);color:var(--ink);
+       font-family:var(--font);line-height:1.5;
+       background-image:radial-gradient(700px 380px at 20% -8%,rgba(79,214,255,.13),transparent 62%),
+                        radial-gradient(600px 340px at 90% 12%,rgba(169,139,255,.12),transparent 62%);}
+  .wrap{max-width:520px;margin:0 auto;padding:22px 16px 40px}
+  header{text-align:center;margin-bottom:20px}
+  h1{margin:0;font-size:21px;letter-spacing:.2em;font-weight:650}
+  h1 span{background:linear-gradient(96deg,var(--cy),var(--pu));
+          -webkit-background-clip:text;background-clip:text;color:transparent}
+  header p{margin:3px 0 0;font-size:12px;color:var(--faint)}
+  .card{background:rgba(255,255,255,.055);border:1px solid var(--edge);
+        border-radius:20px;padding:16px 17px;margin-bottom:13px;
+        backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+  .card h2{margin:0 0 4px;font-size:13px;letter-spacing:.04em}
+  .card p{margin:0 0 11px;font-size:12.5px;color:var(--dim)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  input{flex:1;min-width:0;padding:13px 14px;border-radius:13px;
+        background:rgba(0,0,0,.32);border:1px solid var(--edge);color:var(--ink);
+        font-family:var(--font);font-size:16px;outline:0}
+  input#code{font-family:var(--mono);font-size:26px;letter-spacing:.34em;text-align:center}
+  input:focus{border-color:rgba(79,214,255,.5)}
+  button{padding:13px 17px;border-radius:13px;border:1px solid var(--edge);
+         background:rgba(255,255,255,.07);color:var(--ink);font-family:var(--mono);
+         font-size:11px;letter-spacing:.1em;cursor:pointer;transition:transform .3s,background .3s}
+  button:active{transform:scale(.96)}
+  button.primary{background:linear-gradient(96deg,rgba(79,214,255,.28),rgba(169,139,255,.28));
+                 border-color:rgba(79,214,255,.4);color:#fff}
+  button.wide{width:100%;margin-top:10px}
+  button:disabled{opacity:.4}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;
+      font-size:13px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .kv:last-child{border-bottom:0}
+  .kv span{color:var(--dim)} .kv b{font-family:var(--mono);font-size:11.5px}
+  .ok{color:var(--gr)} .bad{color:var(--rd)} .warn{color:var(--am)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+       background:var(--faint);margin-right:7px;vertical-align:1px}
+  .dot.on{background:var(--gr);box-shadow:0 0 10px var(--gr);animation:p 2s infinite}
+  @keyframes p{50%{opacity:.4}}
+  .caps{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .cap{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;padding:5px 9px;
+       border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--edge);
+       color:var(--dim)}
+  .cap.on{color:var(--gr);border-color:rgba(78,242,167,.35);background:rgba(78,242,167,.1)}
+  .cap.na{opacity:.4;text-decoration:line-through}
+  /* device type picker */
+  .dtype-head{display:flex;align-items:center;justify-content:space-between;
+              margin:14px 0 7px}
+  .dtype-label{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--faint)}
+  button.tiny{padding:6px 10px;font-size:9px;letter-spacing:.1em}
+  .dtypes{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:7px}
+  .dtype{display:flex;flex-direction:column;align-items:center;gap:3px;
+         padding:11px 6px;border-radius:13px;background:rgba(255,255,255,.05);
+         border:1px solid var(--edge);cursor:pointer;transition:.2s}
+  .dtype i{font-style:normal;font-size:19px;line-height:1}
+  .dtype b{font-family:var(--font);font-size:10.5px;font-weight:500;color:var(--dim);
+           letter-spacing:0}
+  .dtype.on{background:rgba(79,214,255,.14);border-color:rgba(79,214,255,.5)}
+  .dtype.on b{color:#fff}
+  .dtype.guess{border-style:dashed}
+  .dtype-why{margin:9px 0 0!important;font-size:11.5px;color:var(--faint)}
+  .log{max-height:190px;overflow-y:auto;font-family:var(--mono);font-size:10.5px;
+       color:var(--dim);background:rgba(0,0,0,.28);border-radius:12px;padding:9px 11px}
+  .log div{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.045)}
+  .log div:last-child{border-bottom:0}
+  .note{margin-top:10px;padding:9px 12px;border-radius:12px;font-size:11.5px;
+        color:var(--am);background:rgba(255,196,107,.09);border:1px solid rgba(255,196,107,.22)}
+  .hide{display:none}
+  a{color:var(--cy)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AURA <span>COMPANION</span></h1>
+    <p id="sub">Pair this phone with your laptop</p>
+  </header>
+
+  <!-- PAIRING -->
+  <section class="card" id="pair-card">
+    <h2>Pair with AURA</h2>
+    <p>On the laptop open <b>Settings → Devices</b> and press <b>PAIR A DEVICE</b>.
+       Type the 6-digit code it shows.</p>
+
+    <!-- DEVICE TYPE. Detected, never assumed: this page opens just as often on
+         a second laptop window as on a phone, and the capability set and the
+         wording differ per platform. -->
+    <div class="dtype-head">
+      <span class="dtype-label">THIS DEVICE IS A</span>
+      <button id="btn-detect" class="tiny">AUTO-DETECT</button>
+    </div>
+    <div class="dtypes" id="dtypes" role="radiogroup" aria-label="Device type">
+      <button class="dtype" data-dtype="android" role="radio" aria-checked="false">
+        <i>🤖</i><b>Android</b></button>
+      <button class="dtype" data-dtype="ios" role="radio" aria-checked="false">
+        <i>📱</i><b>iPhone / iPad</b></button>
+      <button class="dtype" data-dtype="windows" role="radio" aria-checked="false">
+        <i>🪟</i><b>Windows</b></button>
+      <button class="dtype" data-dtype="macos" role="radio" aria-checked="false">
+        <i>🍎</i><b>macOS</b></button>
+      <button class="dtype" data-dtype="linux" role="radio" aria-checked="false">
+        <i>🐧</i><b>Linux</b></button>
+    </div>
+    <p class="dtype-why" id="dtype-why"></p>
+
+    <div class="row">
+      <input id="name" type="text" placeholder="Name this device" autocomplete="off">
+    </div>
+    <div class="row" style="margin-top:9px">
+      <input id="code" type="tel" inputmode="numeric" maxlength="6" placeholder="000000">
+    </div>
+    <button class="primary wide" id="btn-pair">PAIR</button>
+    <div class="note hide" id="pair-err"></div>
+  </section>
+
+  <!-- CONNECTED -->
+  <section class="card hide" id="conn-card">
+    <h2><span class="dot" id="dot"></span><span id="conn-state">Connecting…</span></h2>
+    <div class="kv"><span>Device ID</span><b id="d-id">—</b></div>
+    <div class="kv"><span>Name</span><b id="d-name">—</b></div>
+    <div class="kv"><span>Latency</span><b id="d-lat">—</b></div>
+    <div class="kv"><span>Battery</span><b id="d-bat">—</b></div>
+    <div class="kv"><span>Actions run</span><b id="d-acts">0</b></div>
+    <div class="caps" id="caps"></div>
+    <button class="wide" id="btn-unpair">FORGET THIS PAIRING</button>
+  </section>
+
+  <!-- CAMERA -->
+  <section class="card hide" id="cam-card">
+    <h2>Camera &amp; microphone</h2>
+    <p id="cam-why">Checking what this browser allows…</p>
+    <div class="kv"><span>Secure context</span><b id="cam-sec">—</b></div>
+    <div class="kv"><span>getUserMedia</span><b id="cam-api">—</b></div>
+    <button class="wide" id="btn-cam">TEST THIS DEVICE'S CAMERA</button>
+    <div class="note hide" id="cam-note"></div>
+  </section>
+
+  <section class="card hide" id="log-card">
+    <h2>Activity</h2>
+    <div class="log" id="log"></div>
+  </section>
+</div>
+
+<script type="module" src="js/phone.js"></script>
+</body>
+</html>

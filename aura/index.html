@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="aura-blue">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="NOVA — Next-gen Omnipresent Vision & Action Assistant. A human-like desktop AI assistant with voice, vision, gestures, and device awareness.">
+<meta name="theme-color" content="#04121f">
+<title>NOVA · Desktop AI Assistant</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='none' stroke='%2322d3ee' stroke-width='7'/><circle cx='50' cy='50' r='15' fill='%2322d3ee'/></svg>">
+<link rel="stylesheet" href="./css/aura.css">
+</head>
+<body>
+
+<!-- ══════════════════ BOOT SEQUENCE ══════════════════ -->
+<div id="boot" class="boot" role="status" aria-live="polite">
+  <div class="boot-inner">
+    <div class="boot-logo">
+      <svg viewBox="0 0 200 200" width="132" height="132" aria-hidden="true">
+        <circle class="bl-ring bl-r1" cx="100" cy="100" r="82" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".35"/>
+        <circle class="bl-ring bl-r2" cx="100" cy="100" r="66" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="26 14" opacity=".65"/>
+        <circle class="bl-ring bl-r3" cx="100" cy="100" r="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="8 10" opacity=".5"/>
+        <circle class="bl-core" cx="100" cy="100" r="22" fill="currentColor" opacity=".9"/>
+        <circle cx="100" cy="100" r="30" fill="none" stroke="currentColor" stroke-width="1" opacity=".4"/>
+      </svg>
+    </div>
+    <h1 class="boot-title">N O V A</h1>
+    <p class="boot-sub">Next-gen&nbsp;Omnipresent&nbsp;Vision&nbsp;&amp;&nbsp;Action&nbsp;Assistant</p>
+    <div class="boot-bar"><div id="boot-fill" class="boot-fill"></div></div>
+    <ul id="boot-log" class="boot-log" aria-label="Boot log"></ul>
+    <button id="boot-enter" class="boot-enter" hidden>
+      <span>INITIALIZE</span>
+      <small>click to enable audio &amp; enter</small>
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════ BACKGROUND FX ══════════════════ -->
+<canvas id="fx-canvas" class="fx-canvas" aria-hidden="true"></canvas>
+<div class="grid-floor" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+<div class="scanlines" aria-hidden="true"></div>
+
+<!-- ══════════════════ APP ══════════════════ -->
+<div id="app" class="app" hidden>
+
+  <!-- ─────── TOP BAR ─────── -->
+  <header class="topbar" role="banner">
+    <div class="tb-left">
+      <div class="brand" title="NOVA">
+        <svg viewBox="0 0 100 100" width="30" height="30" aria-hidden="true" class="brand-mark">
+          <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="4" opacity=".5"/>
+          <circle cx="50" cy="50" r="26" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="14 8"/>
+          <circle cx="50" cy="50" r="11" fill="currentColor"/>
+        </svg>
+        <div class="brand-text">
+          <strong>NOVA</strong>
+          <span id="brand-sub">SYSTEM ONLINE</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="tb-center">
+      <div class="stat" title="Active AI reasoning core">
+        <span class="stat-k">CORE</span>
+        <span id="stat-core" class="stat-v">local</span>
+      </div>
+      <div class="stat" title="Avatar render framerate">
+        <span class="stat-k">FPS</span>
+        <span id="stat-fps" class="stat-v">–</span>
+      </div>
+      <div class="stat" title="Vision pipeline framerate">
+        <span class="stat-k">VIS</span>
+        <span id="stat-vis" class="stat-v">off</span>
+      </div>
+      <div class="stat" title="Detected hands / faces / objects">
+        <span class="stat-k">DET</span>
+        <span id="stat-det" class="stat-v">0/0/0</span>
+      </div>
+      <div class="stat" title="Messages held in memory">
+        <span class="stat-k">MEM</span>
+        <span id="stat-mem" class="stat-v">0</span>
+      </div>
+    </div>
+
+    <div class="tb-right">
+      <!-- Gesture reference lives here, not in the left dock: it is a
+           reference sheet, not a workspace panel. Same data-panel hook, so
+           behaviour is unchanged. -->
+      <button class="icon-btn" data-panel="gestures" title="Gesture reference"
+              aria-label="Gesture reference">✋</button>
+      <button id="btn-theme" class="icon-btn" title="Cycle theme (T)" aria-label="Cycle theme">◐</button>
+      <button id="btn-ar" class="icon-btn" title="Toggle AR mode" aria-label="Toggle AR mode">◈</button>
+      <button id="btn-settings" class="icon-btn" title="Settings (,)" aria-label="Open settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- ─────── LEFT DOCK ─────── -->
+  <nav class="dock" role="navigation" aria-label="Module dock">
+    <button class="dock-btn" data-panel="chat" title="Conversation" aria-label="Conversation panel">
+      <span class="dock-ico">💬</span><span class="dock-lbl">CHAT</span>
+    </button>
+    <button class="dock-btn" data-panel="vision" title="Vision &amp; gestures" aria-label="Vision panel">
+      <span class="dock-ico">👁</span><span class="dock-lbl">VISION</span>
+    </button>
+    <a class="dock-btn" href="/screen" id="dock-live"
+       title="AURA Live — full screen control page" aria-label="AURA Live">
+      <span class="dock-ico">🖵</span><span class="dock-lbl">LIVE</span>
+    </a>
+    <button class="dock-btn" data-panel="devconsole" title="Developer console — how AURA thinks" aria-label="Developer console">
+      <span class="dock-ico">⌬</span><span class="dock-lbl">DEV</span>
+    </button>
+    <button class="dock-btn" data-panel="ops" title="System center — telemetry, memory, diagnostics" aria-label="System center">
+      <span class="dock-ico">◈</span><span class="dock-lbl">SYSTEM</span>
+    </button>
+    <button class="dock-btn" data-panel="wardrobe" title="Avatar wardrobe" aria-label="Wardrobe panel">
+      <span class="dock-ico">👕</span><span class="dock-lbl">STYLE</span>
+    </button>
+    <div class="dock-sep"></div>
+    <button id="dock-mic" class="dock-btn accent" title="Toggle microphone (Space)" aria-label="Toggle microphone">
+      <span class="dock-ico">🎙</span><span class="dock-lbl">MIC</span>
+    </button>
+    <button id="dock-speak" class="dock-btn" title="Toggle voice output (M)" aria-label="Toggle voice output">
+      <span class="dock-ico">🔊</span><span class="dock-lbl">VOICE</span>
+    </button>
+  </nav>
+
+  <!-- ─────── STAGE (avatar) ─────── -->
+  <main class="stage" role="main">
+    <div id="avatar-host" class="avatar-host" aria-label="AURA avatar"></div>
+
+    <div class="stage-hud" aria-hidden="true">
+      <div class="hud-corner tl"></div><div class="hud-corner tr"></div>
+      <div class="hud-corner bl"></div><div class="hud-corner br"></div>
+      <div class="hud-ring"></div>
+    </div>
+
+    <div id="ar-badge" class="ar-badge" hidden>SIMULATED AR</div>
+
+    <div class="stage-caption">
+      <div id="caption" class="caption" aria-live="polite"></div>
+      <div id="gesture-flash" class="gesture-flash" hidden></div>
+    </div>
+
+    <div id="cc-voice" class="cc-voice-host" aria-live="polite"></div>
+
+    <aside class="cc-feed-host" aria-label="Live activity">
+      <div class="cc-feed-h"><span>LIVE ACTIVITY</span><i id="cc-feed-dot" class="cc-live-dot"></i></div>
+      <div id="cc-feed" class="cc-feed" role="log"></div>
+    </aside>
+
+    <div class="stage-status">
+      <span id="status-pill" class="pill">IDLE</span>
+      <span id="emotion-pill" class="pill dim">neutral</span>
+    </div>
+  </main>
+
+  <!-- ─────── RIGHT PANEL STACK ─────── -->
+  <!-- .panels is the flex COLUMN. .panel-stack holds the absolutely-positioned
+       panels; #trace-log is its SIBLING, so a running trace takes real space
+       and shrinks the stack instead of painting through it. Before v0.20 the
+       log was an in-flow child of .panels while every .panel was
+       position:absolute with a transparent background — the two text layers
+       landed on the same pixels (bug #100). -->
+  <aside class="panels" role="complementary">
+   <div class="panel-stack">
+
+    <!-- CHAT -->
+    <section class="panel active" data-panel="chat" aria-label="Conversation">
+      <header class="panel-h">
+        <h2>CONVERSATION</h2>
+        <div class="panel-tools">
+          <button id="btn-export" class="mini-btn" title="Export transcript">⤓</button>
+          <button id="btn-clear" class="mini-btn" title="Clear memory">⌫</button>
+        </div>
+      </header>
+
+      <div id="transcript" class="transcript" role="log" aria-live="polite" aria-label="Conversation transcript"></div>
+
+      <div id="interim" class="interim" hidden></div>
+
+      <div class="composer">
+        <div class="composer-row">
+          <textarea id="input" class="input" rows="1" placeholder="Message AURA…  (/help for commands)"
+                    aria-label="Message input" autocomplete="off" spellcheck="true"></textarea>
+          <button id="btn-mic" class="round-btn" title="Voice input" aria-label="Voice input">🎙</button>
+          <button id="btn-send" class="round-btn primary" title="Send (Enter)" aria-label="Send message">➤</button>
+        </div>
+        <div class="composer-actions">
+          <button id="btn-stop" class="chip danger" hidden title="Abort the in-flight response">■ STOP</button>
+          <button id="btn-continue" class="chip" hidden title="Resume the previous reply">▶ CONTINUE</button>
+          <button id="btn-regen" class="chip" hidden title="Regenerate the last reply">↻ REGENERATE</button>
+          <button id="btn-interrupt" class="chip warn" hidden title="Stop AURA speaking">🔇 INTERRUPT</button>
+          <span class="composer-hint" id="composer-hint">Local Core</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- VISION -->
+    <section class="panel" data-panel="devconsole" aria-label="Developer console">
+      <header class="panel-h">
+        <h2>DEVELOPER CONSOLE</h2>
+        <div class="panel-tools">
+          <button id="dc-pause" class="mini-btn" title="Pause the live stream">⏸</button>
+          <button id="dc-clear" class="mini-btn" title="Clear">✕</button>
+        </div>
+      </header>
+
+      <div class="dc-flow" id="dc-flow" aria-label="Runtime pipeline">
+        <span class="dc-node" data-node="user">USER</span><span class="dc-arrow">›</span>
+        <span class="dc-node" data-node="intent">INTENT</span><span class="dc-arrow">›</span>
+        <span class="dc-node" data-node="planner">PLANNER</span><span class="dc-arrow">›</span>
+        <span class="dc-node" data-node="vision">VISION</span><span class="dc-arrow">›</span>
+        <span class="dc-node" data-node="runtime">RUNTIME</span><span class="dc-arrow">›</span>
+        <span class="dc-node" data-node="desktop">DESKTOP</span>
+      </div>
+
+      <div class="dc-tabs" role="tablist">
+        <button class="dc-tab active" data-dc="overview">OVERVIEW</button>
+        <button class="dc-tab" data-dc="world">WORLD</button>
+        <button class="dc-tab" data-dc="commands">COMMANDS</button>
+        <button class="dc-tab" data-dc="events">EVENTS</button>
+        <button class="dc-tab" data-dc="logs">LOGS</button>
+      </div>
+
+      <div class="dc-body">
+        <div class="dc-pane active" data-dcpane="overview" id="dc-overview"></div>
+        <div class="dc-pane" data-dcpane="world" id="dc-world"></div>
+        <div class="dc-pane" data-dcpane="commands" id="dc-commands"></div>
+        <div class="dc-pane" data-dcpane="events">
+          <input id="dc-evfilter" class="dt-search" placeholder="Filter events…">
+          <div id="dc-events" class="dc-stream"></div>
+        </div>
+        <div class="dc-pane" data-dcpane="logs">
+          <input id="dc-logfilter" class="dt-search" placeholder="Filter logs…">
+          <div id="dc-logs" class="dc-stream"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="vision" aria-label="Vision">
+      <header class="panel-h">
+        <h2>VISION</h2>
+        <div class="panel-tools">
+          <button id="btn-snapshot" class="mini-btn" title="Capture frame">◉</button>
+          <button id="btn-cam" class="mini-btn accent" title="Toggle camera">▶</button>
+        </div>
+      </header>
+
+      <div class="cam-wrap">
+        <video id="video" class="cam-video" playsinline muted autoplay aria-label="Webcam feed"></video>
+        <canvas id="overlay" class="cam-overlay" aria-hidden="true"></canvas>
+        <div id="cam-placeholder" class="cam-placeholder">
+          <div class="cam-ph-icon">👁</div>
+          <p><strong>Vision offline</strong></p>
+          <p class="dim">Enable the camera for hand tracking, face detection and gesture control.</p>
+          <button id="btn-cam-start" class="btn">ENABLE CAMERA</button>
+          <button id="btn-diagnose" class="btn ghost">WHY ISN'T IT WORKING?</button>
+          <p id="cam-error" class="cam-error" hidden></p>
+        </div>
+        <div class="cam-hud" aria-hidden="true">
+          <span id="cam-fps">–</span>
+        </div>
+      </div>
+
+      <div class="vision-readout">
+        <div class="ro"><span class="ro-k">GESTURE</span><span id="ro-gesture" class="ro-v">none</span></div>
+        <div class="conf-bar"><div id="conf-fill" class="conf-fill"></div></div>
+        <div class="ro-grid">
+          <div class="ro"><span class="ro-k">HANDS</span><span id="ro-hands" class="ro-v">0</span></div>
+          <div class="ro"><span class="ro-k">FACES</span><span id="ro-faces" class="ro-v">0</span></div>
+          <div class="ro"><span class="ro-k">OBJECTS</span><span id="ro-objects" class="ro-v">0</span></div>
+        </div>
+        <div class="toggle-row">
+          <label class="switch"><input type="checkbox" id="tg-hands" checked><span></span>Hands</label>
+          <label class="switch"><input type="checkbox" id="tg-faces" checked><span></span>Faces</label>
+          <label class="switch"><input type="checkbox" id="tg-objects"><span></span>Objects</label>
+        </div>
+        <button id="btn-describe" class="btn wide">DESCRIBE WHAT YOU SEE</button>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>AURA Live</h4>
+            <span id="live-badge" class="setup-badge">ON</span></div>
+          <p class="setup-hint">
+            The full-page screen-control interface at <code>/screen</code>.
+            Turning this off hides the dock entry and skips its runtime setup —
+            the code and the route stay exactly as they are, and turning it back
+            on restores it unchanged.
+          </p>
+          <label class="switch"><input type="checkbox" id="tg-auralive" checked><span></span>
+            Show AURA Live</label>
+        </div>
+
+        <div class="dt-section dw-section">
+          <div class="dt-head">
+            <h4>⊙ Dwell to Click</h4>
+            <span id="dw-badge" class="setup-badge">OFF</span>
+          </div>
+          <p class="setup-hint">
+            Point at something and hold still. A ring fills 0 → 100% on the
+            camera overlay and then clicks. Clicking AURA's own buttons needs no
+            permission. Clicking your <em>Windows desktop</em> needs the
+            <strong>Vision Mouse Control</strong> permission and a full-monitor
+            screen share.
+          </p>
+
+          <label class="switch pg-main"><input type="checkbox" id="dw-enable"><span></span>
+            Enable dwell to click</label>
+
+          <div id="dw-live" class="pg-live" hidden>
+            <div class="pg-row"><span>State</span><b id="dw-state">—</b></div>
+            <div class="pg-row"><span>Target</span><b id="dw-target">—</b></div>
+            <div class="pg-row"><span>Progress</span><b id="dw-pct">0%</b></div>
+            <div class="pg-row"><span>Clicks</span><b id="dw-count">0</b></div>
+            <div class="pg-meter"><i id="dw-bar"></i></div>
+            <p class="setup-hint" id="dw-reason"></p>
+          </div>
+
+          <label class="pg-slider">Hold time
+            <span id="dw-ms-v">1000 ms</span>
+            <input type="range" id="dw-ms" min="600" max="2500" step="50" value="1000">
+          </label>
+          <label class="pg-slider">Steadiness needed
+            <span id="dw-rad-v">2.6%</span>
+            <input type="range" id="dw-rad" min="10" max="60" step="1" value="26">
+          </label>
+
+          <div id="dw-perm" class="setup-warn" hidden></div>
+          <div class="btn-row">
+            <button id="dw-grant" class="btn ghost">GRANT VISION MOUSE CONTROL</button>
+          </div>
+        </div>
+
+        <div class="dt-section pg-section">
+          <div class="dt-head">
+            <h4>🛡 Privacy Guard</h4>
+            <span id="pg-badge" class="setup-badge">OFF</span>
+          </div>
+          <p class="setup-hint">
+            Minimises the focused window when someone is detected behind you.
+            Runs entirely on the existing camera pipeline — no AI call, no
+            screenshot, nothing leaves the machine.
+          </p>
+
+          <label class="switch pg-main"><input type="checkbox" id="pg-enable"><span></span>
+            Enable Privacy Guard</label>
+
+          <div id="pg-live" class="pg-live" hidden>
+            <div class="pg-row"><span>Status</span><b id="pg-state">—</b></div>
+            <div class="pg-row"><span>Detection</span><b id="pg-detect">—</b></div>
+            <div class="pg-row"><span>Confidence</span><b id="pg-conf">—</b></div>
+            <div class="pg-row"><span>Protection</span><b>Minimize active window</b></div>
+            <div class="pg-row"><span>Faces in frame</span><b id="pg-faces">—</b></div>
+          <div class="pg-row"><span>Recognised</span><b id="pg-known">—</b></div>
+          <div class="pg-row"><span>Cooldown</span><b id="pg-cool">—</b></div>
+          <div class="pg-veto" id="pg-veto" hidden></div>
+            <div class="pg-meter"><i id="pg-bar"></i></div>
+          </div>
+
+          <div class="pg-settings">
+            <div class="ward-label">WHO COUNTS AS A THREAT</div>
+            <label class="switch"><input type="checkbox" id="pg-owner" checked><span></span>
+              Never minimise when I'm alone (or with enrolled people)</label>
+            <label class="pg-slider">Minimum faces before acting
+              <span id="pg-minfaces-v">2</span>
+              <input type="range" id="pg-minfaces" min="1" max="4" step="1" value="2">
+            </label>
+            <p class="setup-hint" id="pg-enrolled">No faces enrolled yet.</p>
+            <div class="btn-row">
+              <button id="pg-manage-faces" class="btn ghost">MANAGE FACE IDs</button>
+            </div>
+
+            <div class="ward-label" style="margin-top:.7rem">SENSITIVITY</div>
+            <div class="ward-grid" id="pg-sens"></div>
+            <p class="setup-hint" id="pg-sens-hint"></p>
+
+            <label class="pg-slider">Detection persistence
+              <span id="pg-persist-v">800 ms</span>
+              <input type="range" id="pg-persist" min="100" max="3000" step="50" value="800">
+            </label>
+            <label class="pg-slider">Minimum confidence
+              <span id="pg-conf-v">80%</span>
+              <input type="range" id="pg-minconf" min="30" max="99" step="1" value="80">
+            </label>
+            <label class="pg-slider">Proximity (frame area)
+              <span id="pg-area-v">4.0%</span>
+              <input type="range" id="pg-area" min="2" max="200" step="1" value="40">
+            </label>
+            <label class="pg-slider">Cooldown
+              <span id="pg-cd-v">5 s</span>
+              <input type="range" id="pg-cd" min="0" max="30" step="1" value="5">
+            </label>
+          </div>
+
+          <div id="pg-perm" class="setup-warn" hidden></div>
+          <div class="btn-row">
+            <button id="pg-test" class="btn ghost">TEST MINIMIZE</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GESTURES -->
+    <section class="panel" data-panel="gestures" aria-label="Gestures">
+      <header class="panel-h"><h2>GESTURE CONTROL</h2></header>
+      <div class="gest-list" id="gest-list"></div>
+      <div class="panel-note">
+        Gestures require the camera. Hold a pose steady for ~5 frames; a
+        <strong>2.2 s cooldown</strong> per gesture prevents accidental re-fires.
+      </div>
+    </section>
+
+    <!-- COMMAND CENTER -->
+    <section class="panel" data-panel="ops" aria-label="Command center">
+      <header class="panel-h">
+        <h2>SYSTEM CENTER</h2>
+        <div class="panel-tools">
+          <span id="cc-clock" class="cc-clock"></span>
+          <button id="btn-selftest" class="mini-btn" title="Run self test">✓</button>
+        </div>
+      </header>
+      <div class="cc-scroll">
+        <div class="cc-block"><div class="cc-block-h">AI CORE</div><div id="cc-ai-core" class="cc-ai-core"></div></div>
+        <div class="cc-block"><div class="cc-block-h">AGENTS</div><div id="cc-agents"></div></div>
+        <div class="cc-block"><div class="cc-block-h">SYSTEM MONITOR</div><div id="cc-system"></div></div>
+        <div class="cc-block"><div class="cc-block-h">MEMORY CENTER</div><div id="cc-memory"></div></div>
+        <div class="cc-block"><div class="cc-block-h">PLUGINS &amp; TOOLS</div><div id="cc-plugins"></div></div>
+        <!-- Merged in from the old SYSTEM panel: same ids, so renderSysReadout()
+             and the event log keep working untouched. -->
+        <div class="cc-block"><div class="cc-block-h">DIAGNOSTICS</div>
+          <div id="sys-readout" class="sys-readout"></div></div>
+        <div class="cc-block"><div class="cc-block-h">EVENT LOG</div>
+          <div id="event-log" class="event-log" role="log"></div></div>
+      </div>
+    </section>
+
+    <!-- WARDROBE -->
+    <section class="panel" data-panel="wardrobe" aria-label="Avatar wardrobe">
+      <header class="panel-h"><h2>WARDROBE</h2>
+        <div class="panel-tools"><button id="btn-randomize" class="mini-btn" title="Randomise look">🎲</button></div>
+      </header>
+      <div class="wardrobe">
+        <div class="ward-group"><div class="ward-label">OUTFIT</div><div id="ward-outfits" class="ward-grid"></div></div>
+        <div class="ward-group"><div class="ward-label">COLOUR</div><div id="ward-palettes" class="ward-swatches"></div></div>
+        <div class="ward-group"><div class="ward-label">ACCESSORY</div><div id="ward-acc" class="ward-grid"></div></div>
+        <div class="ward-group"><div class="ward-label">BODY</div><div id="ward-body" class="ward-grid"></div></div>
+        <div class="ward-group"><div class="ward-label">HAIR</div><div id="ward-hair" class="ward-grid"></div></div>
+        <div class="ward-group"><div class="ward-label">HAIR COLOUR</div><div id="ward-haircol" class="ward-swatches"></div></div>
+        <div class="ward-group">
+          <div class="ward-label">HEIGHT</div>
+          <div class="ward-range">
+            <input id="ward-height" type="range" min="0.6" max="1.6" step="0.01" value="1">
+            <span id="ward-height-val" class="ward-range-val">100%</span>
+          </div>
+          <div class="ward-grid">
+            <button class="ward-item" data-height="0.8">Short</button>
+            <button class="ward-item" data-height="1">Default</button>
+            <button class="ward-item" data-height="1.25">Tall</button>
+          </div>
+        </div>
+        <div class="ward-group">
+          <div class="ward-label">FORM</div>
+          <div class="ward-grid">
+            <button class="ward-item" data-form="body">🧍 Full body</button>
+            <button class="ward-item" data-form="3d">🗿 Head only</button>
+            <button class="ward-item" data-form="2d">◐ 2D (low power)</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────── INNOVATIONS (hidden) ───────
+         No dock button, no toolbar entry, not in /help. Reachable only by
+         typing the unlock sequence or the hidden /innovations command. -->
+    <section class="panel" data-panel="innovations" aria-label="Innovations">
+      <header class="panel-h">
+        <h2>◆ INNOVATIONS</h2>
+        <div class="panel-tools"><button id="btn-innov-close" class="mini-btn" title="Close">✕</button></div>
+      </header>
+      <div id="innovations-body" class="innovations-body"></div>
+    </section>
+   </div><!-- /.panel-stack -->
+
+    <!-- Screen control lives on its own full page at /screen (AURA Live). The
+         trace log stays mounted here so main-app commands still stream their
+         steps somewhere visible. It is a SIBLING of .panel-stack, never a
+         sibling of the absolutely-positioned panels themselves. -->
+    <section id="trace-dock" class="trace-dock" hidden aria-label="Activity trace">
+      <header class="trace-dock-h">
+        <span class="trace-dock-t">ACTIVITY</span>
+        <button id="btn-trace-close" class="mini-btn" title="Hide the activity trace">✕</button>
+      </header>
+      <div id="trace-log" class="trace-log"></div>
+    </section>
+  </aside>
+
+  <!-- ─────── POINTER RETICLE ─────── -->
+  <div id="reticle" class="reticle" hidden aria-hidden="true">
+    <svg viewBox="0 0 60 60" width="60" height="60">
+      <circle cx="30" cy="30" r="22" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".5"/>
+      <circle cx="30" cy="30" r="12" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="6 5"/>
+      <circle cx="30" cy="30" r="3" fill="currentColor"/>
+      <path d="M30 2v10M30 48v10M2 30h10M48 30h10" stroke="currentColor" stroke-width="1.5"/>
+    </svg>
+  </div>
+
+  <div id="ar-overlay" class="ar-overlay"></div>
+</div>
+
+<!-- ══════════════════ SETTINGS ══════════════════ -->
+<div id="settings" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="modal-backdrop" data-close="1"></div>
+  <div class="modal-box">
+    <header class="modal-h">
+      <h2 id="settings-title">SETTINGS</h2>
+      <button id="btn-settings-close" class="icon-btn" aria-label="Close settings">✕</button>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="ai" role="tab">AI CORE</button>
+      <button class="tab" data-tab="voice" role="tab">VOICE</button>
+      <button class="tab" data-tab="vision" role="tab">VISION</button>
+      <button class="tab" data-tab="ui" role="tab">INTERFACE</button>
+      <button class="tab" data-tab="connect" role="tab">CONNECT</button>
+      <button class="tab" data-tab="devices" role="tab">DEVICES</button>
+      <button class="tab" data-tab="appearance" role="tab">APPEARANCE</button>
+      <button class="tab" data-tab="memory" role="tab">MEMORY</button>
+      <button class="tab" data-tab="avatar" role="tab">AVATAR</button>
+      <button class="tab" data-tab="desktop" role="tab">DESKTOP</button>
+      <button class="tab" data-tab="about" role="tab">ABOUT</button>
+    </nav>
+
+    <div class="modal-body">
+
+      <!-- AI -->
+      <div class="tabpane active" data-tab="ai">
+        <p class="note">
+          AURA has <strong>no backend</strong>. Keys are stored only in this browser's
+          localStorage and sent directly from your machine to the provider you choose.
+          With no key, the offline <em>Local Core</em> runs — real logic, limited knowledge.
+        </p>
+
+        <label class="field">
+          <span>Provider</span>
+          <select id="set-provider">
+            <option value="auto">Auto-detect (recommended)</option>
+            <option value="local">Local Core (offline, no key)</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="groq">Groq (fast + free tier)</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="ollama">Ollama (local server)</option>
+          </select>
+        </label>
+
+        <div id="key-fields"></div>
+
+        <label class="field" id="field-ollama" hidden>
+          <span>Ollama URL</span>
+          <input id="set-ollama-url" type="text" placeholder="http://localhost:11434">
+        </label>
+
+        <label class="field">
+          <span>Model <small id="model-hint"></small></span>
+          <input id="set-model" type="text" placeholder="leave blank for provider default" list="model-list">
+          <datalist id="model-list"></datalist>
+        </label>
+
+        <div class="field-row">
+          <label class="field"><span>Temperature <b id="lbl-temp">0.7</b></span>
+            <input id="set-temp" type="range" min="0" max="2" step="0.05"></label>
+          <label class="field"><span>Max tokens <b id="lbl-tokens">1024</b></span>
+            <input id="set-tokens" type="range" min="128" max="4096" step="64"></label>
+        </div>
+
+        <label class="field"><span>Memory window (turns) <b id="lbl-mem">20</b></span>
+          <input id="set-memturns" type="range" min="2" max="60" step="1"></label>
+
+        <label class="field"><span>System prompt</span>
+          <textarea id="set-sysprompt" rows="5"></textarea></label>
+
+        <div class="btn-row">
+          <button id="btn-test" class="btn">TEST CONNECTION</button>
+          <button id="btn-fetch-models" class="btn ghost">FETCH MODELS</button>
+          <button id="btn-wizard" class="btn ghost">SETUP WIZARD</button>
+        </div>
+        <pre id="test-out" class="test-out" hidden></pre>
+      </div>
+
+      <!-- VOICE -->
+      <div class="tabpane" data-tab="voice">
+        <div id="voice-support" class="note"></div>
+        <label class="switch block"><input type="checkbox" id="set-tts"><span></span>Speech output enabled</label>
+        <label class="field"><span>Voice</span><select id="set-voice"></select></label>
+        <div class="field-row">
+          <label class="field"><span>Rate <b id="lbl-rate">1.03</b></span><input id="set-rate" type="range" min="0.5" max="2" step="0.01"></label>
+          <label class="field"><span>Pitch <b id="lbl-pitch">0.95</b></span><input id="set-pitch" type="range" min="0" max="2" step="0.01"></label>
+        </div>
+        <label class="field"><span>Volume <b id="lbl-vol">1.00</b></span><input id="set-vol" type="range" min="0" max="1" step="0.01"></label>
+        <button id="btn-test-voice" class="btn">TEST VOICE</button>
+        <hr>
+        <label class="field"><span>Recognition language</span>
+          <select id="set-sttlang">
+            <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option>
+            <option value="en-IN">English (India)</option><option value="hi-IN">Hindi</option>
+            <option value="es-ES">Spanish</option><option value="fr-FR">French</option>
+            <option value="de-DE">German</option><option value="ja-JP">Japanese</option>
+            <option value="zh-CN">Chinese</option><option value="pt-BR">Portuguese (BR)</option>
+          </select></label>
+        <label class="switch block"><input type="checkbox" id="set-autosend"><span></span>Auto-send when I stop talking</label>
+        <label class="switch block"><input type="checkbox" id="set-wake"><span></span>Continuous Wake Word Detection</label>
+        
+        <div class="wakeword-manager">
+          <label class="field"><span>Wake Word Presets</span>
+            <select id="set-wake-presets">
+              <option value="">Choose preset to load…</option>
+              <option value="nova, hey nova">NOVA ("Nova", "Hey Nova")</option>
+              <option value="aura, hey aura">AURA ("AURA", "Hey AURA")</option>
+              <option value="jarvis">Jarvis</option>
+              <option value="computer">Computer</option>
+              <option value="all">Standard Suite (NOVA, AURA, Jarvis, Computer)</option>
+            </select>
+          </label>
+          <label class="field"><span>Active Wake Words &amp; Triggers</span></label>
+          <div id="wakeword-tags" class="wakeword-tags"></div>
+          <div class="mem-bar">
+            <input id="wakeword-add-input" type="text" class="dt-search" placeholder="Type wake word (e.g. 'Hey Nova', 'Yo AURA') and press Enter…" maxlength="40">
+            <button id="btn-add-wakeword" class="btn" type="button">+ ADD</button>
+          </div>
+          <input id="set-wakeword" type="hidden">
+        </div>
+        <p class="note dim">
+          <strong>Wake Word Triggers:</strong> Browser voice detection will listen continuously for any phrase tagged above. Custom wake words are saved to your configuration.
+        </p>
+      </div>
+
+      <!-- VISION -->
+      <div class="tabpane" data-tab="vision">
+        <label class="switch block"><input type="checkbox" id="set-hands"><span></span>Hand tracking</label>
+        <label class="switch block"><input type="checkbox" id="set-faces"><span></span>Face tracking</label>
+        <hr>
+        <label class="switch block"><input type="checkbox" id="set-facerec"><span></span>
+          Face recognition <small>(recognise who is on camera)</small></label>
+        <p class="setup-hint" id="face-privacy-note">
+          Derived from the 478 face landmarks AURA already computes — no extra download,
+          fully offline. Stores a numeric signature per person, <strong>never an image</strong>,
+          in this browser only. Good for a household; not a security mechanism.
+        </p>
+        <div class="mem-bar">
+          <input id="face-name" type="text" class="dt-search" placeholder="Name to enrol…" maxlength="40">
+          <button id="face-enrol" class="btn">ENROL FACE</button>
+        </div>
+        <div id="face-status" class="setup-hint"></div>
+        <div id="face-list" class="mem-list"></div>
+        <label class="switch block"><input type="checkbox" id="set-facegreet"><span></span>
+          Greet people by name when they appear</label>
+        <hr>
+        <label class="switch block"><input type="checkbox" id="set-objects"><span></span>Object detection (heavier)</label>
+        <label class="switch block"><input type="checkbox" id="set-mirror"><span></span>Mirror camera</label>
+        <label class="field"><span>Vision FPS target <b id="lbl-vfps">24</b></span><input id="set-vfps" type="range" min="8" max="60" step="1"></label>
+        <label class="field"><span>Gesture cooldown (ms) <b id="lbl-cool">2200</b></span><input id="set-cooldown" type="range" min="500" max="6000" step="100"></label>
+        <label class="field"><span>Camera</span><select id="set-facing"><option value="user">Front</option><option value="environment">Rear</option></select></label>
+      </div>
+
+      <!-- UI -->
+      <div class="tabpane" data-tab="ui">
+        <label class="field"><span>Theme</span><select id="set-theme"></select></label>
+        <label class="field"><span>Avatar renderer</span>
+          <select id="set-avatar"><option value="body">Full body hologram</option><option value="3d">Head only (WebGL)</option><option value="2d">2D (low power)</option></select></label>
+        <label class="switch block"><input type="checkbox" id="set-glass"><span></span>Glass UI (frosted panels)</label>
+        <label class="switch block"><input type="checkbox" id="set-particles"><span></span>Background particles</label>
+        <label class="switch block"><input type="checkbox" id="set-reduce"><span></span>Reduce motion</label>
+        <label class="switch block"><input type="checkbox" id="set-uisounds"><span></span>UI sound effects</label>
+        <hr>
+        <label class="switch block"><input type="checkbox" id="set-ambient"><span></span>Ambient soundscape</label>
+        <label class="field"><span>Ambient volume <b id="lbl-amb">0.22</b></span><input id="set-ambvol" type="range" min="0" max="1" step="0.01"></label>
+        <label class="switch block"><input type="checkbox" id="set-music"><span></span>Generative background music</label>
+        <label class="field"><span>Music volume <b id="lbl-mus">0.14</b></span><input id="set-musvol" type="range" min="0" max="1" step="0.01"></label>
+        <hr>
+        <label class="switch block"><input type="checkbox" id="set-devskipboot"><span></span>Developer Fast Boot (Instant load / skip boot screen)</label>
+        <div class="btn-row">
+          <button id="btn-reset" class="btn danger">RESET ALL SETTINGS</button>
+        </div>
+      </div>
+
+      <!-- CONNECT -->
+      <div class="tabpane" data-tab="connect">
+        <p class="note"><strong>Offline mode</strong> turns off every internet lookup. AURA then uses only your local model and its offline core — nothing leaves your machine.</p>
+        <label class="switch block"><input type="checkbox" id="set-livedata"><span></span>Live internet data (weather, news, markets, Wikipedia)</label>
+        <label class="field"><span>Default city <small>used when location is denied</small></span>
+          <input id="set-city" type="text" placeholder="e.g. Delhi"></label>
+        <hr>
+        <label class="switch block"><input type="checkbox" id="set-hybrid"><span></span>Hybrid routing — small talk to local Ollama, hard tasks to cloud</label>
+        <label class="field"><span>Local model for quick replies</span>
+          <input id="set-smallmodel" type="text" placeholder="blank = auto-pick from your installed models" list="model-list"></label>
+        <hr>
+        <div id="connect-status" class="note dim"></div>
+        <div class="btn-row"><button id="btn-refresh-conn" class="btn ghost">REFRESH STATUS</button></div>
+      </div>
+
+      <!-- DEVICES (phone / tablet / second machine companion) -->
+      <div class="tabpane" data-tab="devices">
+        <p class="note">
+          Pair another device and AURA can act on it — <em>"open YouTube on my
+          phone"</em>. The companion page is at <code id="dev-url">/phone</code>
+          on this machine's LAN address. A paired device can never run anything
+          on this computer; it only receives work.
+        </p>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Pair a device</h4>
+            <span id="dev-pair-badge" class="setup-badge">IDLE</span></div>
+          <p class="setup-hint">
+            Press the button, then type the 6-digit code into the companion
+            page. The code is single-use and expires in 3 minutes.
+          </p>
+          <div id="dev-code-box" class="dev-code-box" hidden>
+            <div id="dev-qr" class="dev-qr" hidden></div>
+            <div id="dev-code" class="dev-code">000000</div>
+            <div id="dev-code-sub" class="dev-code-sub">expires in 3:00</div>
+            <div id="dev-qr-url" class="dev-qr-url"></div>
+          </div>
+          <div class="btn-row">
+            <button id="dev-pair" class="btn">PAIR A DEVICE</button>
+            <button id="dev-refresh" class="btn ghost">REFRESH</button>
+          </div>
+          <p class="setup-hint" id="dev-lan"></p>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Paired devices</h4>
+            <span id="dev-count" class="setup-badge">0</span></div>
+          <div id="dev-list" class="dev-list"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>📄 Generated files</h4>
+            <span id="doc-badge" class="setup-badge">—</span></div>
+          <p class="setup-hint">
+            Where AURA saves presentations, spreadsheets and documents it
+            creates. Leave blank for the default. The folder is still
+            restricted to your own user folders — AURA cannot write to system
+            locations even if you type one.
+          </p>
+          <label class="field"><span>Save folder</span>
+            <input id="doc-folder" type="text" placeholder="(default)" autocomplete="off"></label>
+          <p class="setup-hint" id="doc-caps"></p>
+          <div class="btn-row">
+            <button id="doc-open" class="btn ghost">OPEN FOLDER</button>
+            <button id="doc-sample" class="btn ghost">CREATE A TEST FILE</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- DESKTOP INTEGRATION -->
+      <div class="tabpane" data-tab="desktop">
+        <div id="dt-status" class="note"></div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Desktop Integration Status</h4><span id="dt-backend" class="setup-badge"></span></div>
+          <div id="dt-caps" class="dt-caps"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head">
+            <h4>Installed Applications</h4>
+            <span id="dt-appcount" class="setup-badge"></span>
+          </div>
+          <input id="dt-appsearch" type="text" placeholder="Search applications…" class="dt-search">
+          <div id="dt-apps" class="dt-apps"></div>
+          <div class="btn-row">
+            <button id="dt-detect" class="btn">🔍 DETECT INSTALLED APPS</button>
+            <button id="dt-app-add" class="btn ghost">+ ADD MANUALLY</button>
+            <button id="dt-scan" class="btn ghost" disabled hidden>RESCAN</button>
+          </div>
+          <div id="dt-detect-status" class="setup-hint"></div>
+          <div id="dt-detected" class="dt-detected" hidden>
+            <div class="dt-head">
+              <h4>Detected on this machine</h4>
+              <span id="dt-detected-count" class="setup-badge"></span>
+            </div>
+            <p class="setup-hint">
+              Nothing here is available to AURA yet. Tick the applications you want it
+              to be able to launch, then press ADD SELECTED.
+            </p>
+            <input id="dt-detected-filter" type="text" class="dt-search" placeholder="Filter detected apps…">
+            <div id="dt-detected-list" class="dt-detected-list"></div>
+            <div class="btn-row">
+              <button id="dt-detected-add" class="btn">ADD SELECTED</button>
+              <button id="dt-detected-close" class="btn ghost">CANCEL</button>
+            </div>
+          </div>
+          <p id="dt-scan-note" class="setup-hint"></p>
+
+          <!-- Add / edit a custom application -->
+          <div id="dt-app-form" class="dt-appform" hidden>
+            <div class="dt-head"><h4 id="dt-app-form-title">Add application</h4></div>
+            <input type="hidden" id="dt-app-id">
+            <label class="field"><span>Name</span>
+              <input id="dt-app-name" type="text" placeholder="e.g. Obsidian" maxlength="60"></label>
+            <label class="field"><span>Icon <small>any emoji</small></span>
+              <input id="dt-app-icon" type="text" placeholder="📦" maxlength="4"></label>
+            <label class="field"><span>Aliases <small>comma separated — what you'll say to launch it</small></span>
+              <input id="dt-app-aliases" type="text" placeholder="notes, vault, obsidian" maxlength="160"></label>
+            <label class="field"><span>Executable / command <small>optional — Windows path or command name</small></span>
+              <input id="dt-app-exe" type="text" placeholder="C:\Users\you\AppData\Local\Obsidian\Obsidian.exe" maxlength="300"></label>
+            <label class="field"><span>Web version <small>optional — used when the app isn't installed</small></span>
+              <input id="dt-app-web" type="text" placeholder="https://app.example.com" maxlength="300"></label>
+            <div id="dt-app-error" class="setup-warn" hidden></div>
+            <div class="btn-row">
+              <button id="dt-app-save" class="btn">SAVE</button>
+              <button id="dt-app-cancel" class="btn ghost">CANCEL</button>
+              <button id="dt-app-delete" class="btn ghost danger" hidden>DELETE</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head">
+            <h4>Desktop Permissions</h4>
+            <span id="dt-permcount" class="setup-badge"></span>
+          </div>
+          <p class="setup-hint">Everything is denied by default. The Action Manager checks these before any action runs.</p>
+          <div id="dt-perms" class="dt-perms"></div>
+          <div class="btn-row">
+            <button id="dt-perm-rec" class="btn ghost">GRANT RECOMMENDED</button>
+            <button id="dt-perm-none" class="btn ghost">REVOKE ALL</button>
+          </div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Web Research</h4><span id="web-badge" class="setup-badge"></span></div>
+          <p class="setup-hint">
+            AURA answers offline first. When it cannot, it searches DuckDuckGo
+            (no API key, no tracking), reads the top pages, and reasons over the
+            real text with your local model.
+          </p>
+          <div id="web-caps" class="setup-hint"></div>
+          <label class="switch block"><input type="checkbox" id="set-websearch"><span></span>
+            Allow web research</label>
+          <label class="field"><span>Depth</span>
+            <select id="set-webdepth">
+              <option value="adaptive">Adaptive — read pages only when needed</option>
+              <option value="snippets">Snippets only — fastest</option>
+              <option value="read">Always read pages — slowest, most thorough</option>
+            </select></label>
+          <div class="mem-bar">
+            <input id="web-test-q" type="text" class="dt-search" placeholder="Try a search…">
+            <button id="web-test" class="btn ghost">TEST</button>
+          </div>
+          <div id="web-test-out" class="setup-hint"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Input Automation</h4><span id="auto-badge" class="setup-badge"></span></div>
+          <p class="setup-hint">
+            Lets AURA move the mouse and type for you. <strong>This is the most
+            powerful thing AURA can do</strong>, so it is off until you arm it,
+            every plan is previewed before it runs, and dangerous key
+            combinations are permanently blocked.
+          </p>
+          <div class="setup-warn" id="auto-failsafe">
+            🛑 Kill switch: slam the mouse pointer into the <strong>top-left corner</strong>
+            of the screen to abort anything running instantly.
+          </div>
+          <div id="auto-caps" class="setup-hint"></div>
+          <div class="btn-row">
+            <button id="auto-arm" class="btn">ARM AUTOMATION</button>
+            <button id="auto-disarm" class="btn ghost">DISARM</button>
+            <button id="auto-cursor" class="btn ghost">WHERE IS MY CURSOR?</button>
+          </div>
+          <div id="auto-status" class="setup-hint"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Terminal Policy</h4><span id="dt-policy-badge" class="setup-badge"></span></div>
+          <p class="setup-hint">
+            Controls how AURA treats shell commands. Command chaining
+            (<code>;</code> <code>&amp;&amp;</code> <code>|</code>) is always blocked —
+            that is injection protection, not a preference.
+          </p>
+          <div id="dt-policy" class="dt-policy"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Installed Plugins</h4><span id="dt-plugcount" class="setup-badge"></span></div>
+          <div id="dt-plugins" class="dt-plugins"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Recent Action Log</h4></div>
+          <div id="dt-audit" class="dt-audit"></div>
+        </div>
+      </div>
+
+
+
+      <!-- APPEARANCE -->
+      <div class="tabpane" data-tab="appearance">
+        <p class="note">
+          Every control here writes a CSS variable, so the whole interface —
+          including the avatar's ground ring and the particle field — restyles
+          instantly. Nothing needs a reload.
+        </p>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Theme preset</h4><span id="thm-active" class="setup-badge"></span></div>
+          <div id="thm-presets" class="thm-presets"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Accent colours</h4></div>
+          <div class="thm-row">
+            <label for="thm-accent">Primary</label>
+            <input id="thm-accent" type="color">
+            <button id="thm-accent-clear" class="btn ghost small">USE PRESET</button>
+          </div>
+          <div class="thm-row">
+            <label for="thm-accent2">Secondary</label>
+            <input id="thm-accent2" type="color">
+          </div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Background</h4></div>
+          <div id="thm-backgrounds" class="thm-chips"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Layout &amp; HUD</h4></div>
+          <div class="ward-label">DENSITY</div>
+          <div id="thm-densities" class="thm-chips"></div>
+          <div class="ward-label" style="margin-top:.6rem">HUD STYLE</div>
+          <div id="thm-huds" class="thm-chips"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Fine tuning</h4></div>
+          <div id="thm-sliders"></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Widget visibility</h4></div>
+          <p class="setup-hint">Hide anything you do not want on screen.</p>
+          <div id="thm-widgets" class="thm-chips"></div>
+        </div>
+
+        <div class="btn-row">
+          <button id="thm-reset" class="btn ghost">RESET APPEARANCE</button>
+          <button id="thm-random" class="btn ghost">🎲 SURPRISE ME</button>
+        </div>
+      </div>
+
+      <!-- MEMORY -->
+      <div class="tabpane" data-tab="memory">
+        <p class="note">
+          Everything AURA remembers, and full control over it. Memory is stored
+          only in this browser — nothing is uploaded. <strong>Pinned</strong>
+          items survive trimming and are always sent to the model.
+        </p>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Memory</h4><span id="mem-stats" class="setup-badge"></span></div>
+          <div class="mem-tabs">
+            <button class="mem-tab on" data-memtab="conversation">CONVERSATION</button>
+            <button class="mem-tab" data-memtab="pinned">PINNED</button>
+            <button class="mem-tab" data-memtab="facts">FACTS</button>
+            <button class="mem-tab" data-memtab="knowledge">KNOWLEDGE</button>
+          </div>
+          <div class="mem-bar">
+            <input id="mem-search" type="text" class="dt-search" placeholder="Search memory…">
+          </div>
+          <div id="mem-list" class="mem-list"></div>
+        </div>
+
+        <div class="dt-section" id="mem-add-section">
+          <div class="dt-head"><h4>Teach AURA something</h4></div>
+          <p class="setup-hint">
+            Stored as long-term knowledge and recalled automatically when relevant —
+            e.g. "I work in IST and prefer 24-hour time."
+          </p>
+          <input id="mem-new" type="text" class="dt-search" placeholder="Something to remember…">
+          <div class="btn-row"><button id="mem-add" class="btn">REMEMBER THIS</button></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Manage</h4></div>
+          <div class="btn-row">
+            <button id="mem-export" class="btn ghost">EXPORT</button>
+            <button id="mem-clear-conv" class="btn ghost">CLEAR CHAT</button>
+            <button id="mem-clear-all" class="btn ghost danger">FORGET EVERYTHING</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AVATAR MANAGER -->
+      <div class="tabpane" data-tab="avatar">
+        <p class="note">
+          The avatar renderer is modular. The <strong>built-in</strong> provider works
+          fully offline with no setup. Whichever you pick, AURA's animation engine
+          drives it — lip-sync, blinking, emotions, idle motion and waving back are
+          shared, not reimplemented per avatar.
+        </p>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Avatar Provider</h4><span id="av-active" class="setup-badge"></span></div>
+          <div id="av-providers" class="av-providers"></div>
+        </div>
+
+        <div class="dt-section" id="av-import-section">
+          <div class="dt-head"><h4>Import VRM / GLB</h4></div>
+          <p class="setup-hint">
+            Load a character you made in VRoid Studio, Blender or any glTF tool.
+            AURA maps its skeleton onto the animation system automatically.
+            Max 80 MB. Nothing is uploaded — the file stays in your browser.
+          </p>
+          <input id="av-file" type="file" accept=".glb,.gltf,.vrm" class="dt-search">
+          <div id="av-import-status" class="setup-hint"></div>
+        </div>
+
+        <div class="dt-section" id="av-rpm-section">
+          <div class="dt-head"><h4>Ready Player Me</h4></div>
+          <p class="setup-hint">
+            Create an avatar at <a href="https://readyplayer.me" target="_blank" rel="noopener">readyplayer.me ↗</a>
+            and paste the URL or ID. Needs internet on first load; no API key.
+          </p>
+          <input id="av-rpm-url" type="text" class="dt-search"
+                 placeholder="https://models.readyplayer.me/xxxxxxxx.glb  or just the ID">
+          <div class="btn-row"><button id="av-rpm-load" class="btn">CONNECT AVATAR</button></div>
+          <div id="av-rpm-status" class="setup-hint"></div>
+        </div>
+
+        <div class="dt-section" id="av-customise-section">
+          <div class="dt-head"><h4>Built-in Avatar Appearance</h4></div>
+          <label class="switch block"><input type="checkbox" id="av-solid"><span></span>
+            Solid character <small>(off = translucent hologram with wireframe)</small></label>
+          <p class="setup-hint">Outfits, colours and accessories live in the STYLE panel on the left dock.</p>
+          <div class="btn-row"><button id="av-open-wardrobe" class="btn ghost">OPEN WARDROBE</button></div>
+        </div>
+
+        <div class="dt-section">
+          <div class="dt-head"><h4>Preview</h4><span id="av-fps" class="setup-badge"></span></div>
+          <p class="setup-hint">The live avatar on the stage updates instantly as you change providers.</p>
+          <div id="av-detail" class="setup-hint"></div>
+        </div>
+      </div>
+
+      <!-- ABOUT -->
+      <div class="tabpane" data-tab="about">
+        <div id="about-body" class="about-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script type="module" src="./js/main.js"></script>
+<noscript>
+  <div style="padding:2rem;color:#7dd3fc;font-family:monospace">AURA requires JavaScript modules. Please enable JavaScript.</div>
+</noscript>
+</body>
+</html>
