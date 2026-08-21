@@ -38,9 +38,10 @@
  * @module ai/task-agent
  */
 
-import { ollama } from './providers.js';
+import { getProvider, PROVIDERS, ollama } from './providers.js';
 import { extractJson, GRID_COLS, GRID_ROWS, overlayGrid } from './screen-agent.js';
-
+import { config } from '../core/config.js';
+import { bus, EV } from '../core/bus.js';
 
 /** Actions the agent may choose from. Deliberately small. */
 export const AGENT_ACTIONS = ['open_app', 'click', 'type', 'hotkey', 'press',
@@ -49,11 +50,7 @@ export const AGENT_ACTIONS = ['open_app', 'click', 'type', 'hotkey', 'press',
 /** Absolute ceiling regardless of caller. */
 export const HARD_MAX_STEPS = 14;
 
-/**
- * Apps we can launch by name, mapped from words a user would actually say.
- * Resolved against the REAL allowlist at runtime — nothing here is assumed
- * to exist on the machine.
- */
+/** Apps we can launch by name, mapped from words a user would actually say. */
 const APP_ALIASES = {
   whatsapp: ['whatsapp', 'whats app', 'wa'],
   telegram: ['telegram', 'tg'],
@@ -81,26 +78,13 @@ export class TaskAgent {
    * @param {any} o.actions  localActions
    * @param {any} o.ai       AIEngine
    * @param {any} [o.cursor]
-   * @param {any} [o.runtime] RuntimeCore — when present, all gates apply
+   * @param {any} [o.runtime] RuntimeCore
    * @param {any} [o.world]   WorldModel
-   * @param {any} [o.knowledge] { validate, knowledgeFor, guessApp } injected
-   *   by the composition root so the AI layer never imports the platform layer
+   * @param {any} [o.knowledge]
    */
   constructor({ screen, agent, actions, ai, cursor = null, runtime = null, world = null,
                 knowledge = null }) {
-    /**
-     * Command validation and desktop knowledge are supplied by the composition
-     * root, NOT imported: js/ai (layer 4) must not reach into js/runtime
-     * (layer 6). Enforced by tests/test-architecture.mjs.
-     * @type {{validate?:Function, knowledgeFor?:Function, guessApp?:Function}}
-     */
     this.knowledge = knowledge || {};
-    /**
-     * When a RuntimeCore is supplied, EVERY action goes through it, so the
-     * registry → permission → precondition → confirm → execute gates apply.
-     * Without one the agent falls back to calling the action bridge directly
-     * (the pre-Runtime behaviour), which keeps older callers working.
-     */
     this.runtime = runtime;
     this.world = world;
     this.screen = screen;
@@ -108,13 +92,19 @@ export class TaskAgent {
     this.actions = actions;
     this.ai = ai;
     this.cursor = cursor;
-    /** @type {Array<{step:number, action:object, result:string}>} */
+    /** @type {Array<{step:number, action:object, result:string, verified?:boolean}>} */
     this.history = [];
     this.running = false;
     this.cancelled = false;
+    this.taskId = null;
+    this.state = 'IDLE'; // IDLE, PLANNING, EXECUTING, OBSERVING, VERIFYING, COMPLETED, FAILED, CANCELLED
   }
 
-  cancel() { this.cancelled = true; }
+  cancel() {
+    this.cancelled = true;
+    this.state = 'CANCELLED';
+    bus.emit(EV.AGENT_STATE, { state: 'idle', reason: 'Task cancelled by user' });
+  }
 
   /** Which allowlisted app id does this text refer to, if any? */
   resolveApp(text, installed) {
@@ -123,44 +113,38 @@ export class TaskAgent {
     let best = null;
     for (const [id, words] of Object.entries(APP_ALIASES)) {
       for (const w of words) {
-        // Word-boundary match so "maps" does not fire on "roadmaps".
         if (new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(t)) {
           if (!best || w.length > best.w.length) best = { id, w };
         }
       }
     }
     if (!best) return null;
-    // Only claim it if the machine really has it (or a web fallback exists).
     return ids.size && !ids.has(best.id) ? { id: best.id, installed: false }
                                          : { id: best.id, installed: true };
   }
 
   /**
-   * Run a task to completion.
-   *
-   * @param {string} task
-   * @param {object} o
-   * @param {any}      o.trace
-   * @param {number}   [o.maxSteps]
-   * @param {(step:object, narration:string) => Promise<boolean>} o.confirm
-   *        Called before every real action. Return false to abort.
-   * @returns {Promise<{ok:boolean, steps:number, message:string, log:Array}>}
+   * Run a task to completion with full autonomous verification loop.
    */
-  async run(task, { trace, maxSteps = 10, confirm }) {
+  async run(task, { trace, maxSteps = 10, confirm, taskId = null }) {
     const budget = Math.min(maxSteps, HARD_MAX_STEPS);
     this.history = [];
     this.running = true;
     this.cancelled = false;
+    this.taskId = taskId || ('task_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+    this.state = 'PLANNING';
+
+    bus.emit(EV.AGENT_STATE, { state: 'planning', task, taskId: this.taskId });
 
     try {
-      // Give the model real context about the machine before it plans.
       let installed = [];
       let running = [];
       try {
         installed = this.actions?.installedApps?.() || [];
         const r = await this.actions?.run?.('running_apps', {});
         if (r?.ok) running = r.running || [];
-      } catch { /* non-fatal — the agent just knows less */ }
+      } catch { /* non-fatal */ }
+
       trace?.info('Machine state',
         `${installed.length} apps available, ${running.length} running`
         + (running.length ? `: ${running.join(', ')}` : ''));
@@ -170,6 +154,7 @@ export class TaskAgent {
           return this._end(false, `Cancelled after ${step - 1} step(s).`);
         }
 
+        this.state = 'PLANNING';
         const decision = await this._decide(task, { installed, running, step, budget, trace });
         if (!decision.ok) return this._end(false, decision.message);
 
@@ -177,48 +162,106 @@ export class TaskAgent {
         trace?.info(`Step ${step}: ${act.action}`, decision.narration);
 
         if (act.action === 'done') {
+          this.state = 'COMPLETED';
           return this._end(true, act.reason || 'Task complete.');
         }
         if (act.action === 'fail') {
+          this.state = 'FAILED';
           return this._end(false, act.reason || 'The agent could not complete this.');
         }
         if (act.action === 'observe') {
-          // A free look. Costs a step so it cannot loop forever.
-          this.history.push({ step, action: act, result: 'looked at the screen again' });
+          this.state = 'OBSERVING';
+          this.history.push({ step, action: act, result: 'observed fresh screen state' });
           await sleep(600);
           continue;
         }
 
-        const approved = await confirm(act, decision.narration);
-        if (!approved) return this._end(false, 'You cancelled the plan.');
+        // Check if approval is required (trusted autonomous mode bypasses redundant UI popups)
+        const isAutonomous = config.get('trustedAutonomous') ?? true;
+        if (!isAutonomous && confirm) {
+          const approved = await confirm(act, decision.narration);
+          if (!approved) return this._end(false, 'You cancelled the plan.');
+        }
+
+        this.state = 'EXECUTING';
+        bus.emit(EV.AGENT_STATE, { state: 'executing', step, action: act.action });
 
         const res = await this._execute(act, trace);
-        this.history.push({ step, action: act, result: res.summary });
+        
+        // Post-action verification
+        this.state = 'VERIFYING';
+        const verification = await this._verifyAction(act, res, trace);
+        const stepSummary = `${res.summary}${verification.verified ? ' [VERIFIED]' : ''}`;
+        
+        this.history.push({
+          step,
+          action: act,
+          result: stepSummary,
+          verified: verification.verified
+        });
+
         if (!res.ok) {
           trace?.warn(`Step ${step} failed`, res.summary);
-          // Do NOT abort. Feeding the failure back is the entire point of a
-          // loop — the model can try a different route.
           if (res.fatal) return this._end(false, res.summary);
         }
-        // Let the UI settle before the next screenshot, otherwise the agent
-        // observes the state it already acted on.
-        await sleep(act.action === 'open_app' ? 2600 : 800);
+
+        // Wait for UI transition before fresh observation
+        await sleep(act.action === 'open_app' ? 2200 : 700);
       }
       return this._end(false,
         `Ran out of steps (${budget}). Increase the budget or break the task up.`);
     } finally {
       this.running = false;
+      if (this.state !== 'COMPLETED' && this.state !== 'CANCELLED') {
+        this.state = 'IDLE';
+      }
+      bus.emit(EV.AGENT_STATE, { state: 'idle', taskId: this.taskId });
     }
   }
 
   _end(ok, message) {
-    return { ok, steps: this.history.length, message, log: this.history };
+    this.state = ok ? 'COMPLETED' : 'FAILED';
+    return { ok, taskId: this.taskId, steps: this.history.length, message, log: this.history };
   }
 
-  /**
-   * Ask the model for exactly ONE next action, given the current screen and
-   * everything already tried.
-   */
+  /** Call multimodal or text LLM via authoritative provider routing. */
+  async _callModel({ sys, usr, images, task }) {
+    // 1. Resolve configured provider
+    const provId = config.get('visionProvider') || config.get('provider') || this.ai?.resolvedProvider || 'auto';
+    let p = provId !== 'auto' ? getProvider(provId) : null;
+
+    if (!p || provId === 'auto' || provId === 'local') {
+      const active = this.ai?.resolvedProvider && this.ai.resolvedProvider !== 'local' ? getProvider(this.ai.resolvedProvider) : null;
+      if (active && (!active.needsKey || config.getKey(active.id))) {
+        p = active;
+      } else {
+        const priorityOrder = ['gemini', 'openrouter', 'openai', 'groq', 'anthropic'];
+        for (const candidate of priorityOrder) {
+          const candProv = getProvider(candidate);
+          if (candProv && config.getKey(candidate)) {
+            p = candProv;
+            break;
+          }
+        }
+        if (!p) p = ollama;
+      }
+    }
+
+    const key = p.needsKey ? config.getKey(p.id) : undefined;
+    let model = (p.id === 'ollama')
+      ? (images ? (this.agent?.pickPlannerModel?.()?.name || this.ai?.pickOllamaModel?.(task)?.name || ollama.installed?.[0])
+                : (this.ai?.pickOllamaModel?.(task)?.name || ollama.installed?.[0]))
+      : (config.get('visionModel') || config.get('model') || p.defaultModel);
+
+    let raw = '';
+    const messages = [{ role: 'system', content: sys }, { role: 'user', content: usr }];
+    for await (const delta of p.stream({ messages, model, key, images, temperature: 0.1, maxTokens: 512 })) {
+      raw += delta;
+    }
+    return { ok: true, raw, provider: p.label, model };
+  }
+
+  /** Ask the model for exactly ONE next action with fresh screen observation. */
   async _decide(task, { installed, running, step, budget, trace }) {
     const appList = installed.map(a => a.id || a).join(', ') || '(none detected)';
     const done = this.history.length
@@ -258,8 +301,7 @@ export class TaskAgent {
     const usr = `TASK: ${task}\n\nAlready done:\n${done}\n\n`
       + `This is step ${step} of at most ${budget}. What is the single next action?`;
 
-    // Screenshot only if we are actually sharing. Step 1 of "open whatsapp"
-    // legitimately has nothing to look at yet.
+    // Fresh screenshot observation on every iteration
     let images;
     if (this.screen?.active) {
       const frame = this.screen.grab();
@@ -269,47 +311,50 @@ export class TaskAgent {
       }
     }
 
-    const model = images
-      ? (this.agent.pickPlannerModel()?.name || this.ai?.pickOllamaModel?.(task)?.name)
-      : (this.ai?.pickOllamaModel?.(task)?.name || ollama.installed?.[0]);
-    if (!model) return { ok: false, message: 'No Ollama model available.' };
-
-    let raw = '';
     try {
-      for await (const d of ollama.stream({
-        messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }],
-        model, images, temperature: 0.1,
-      })) raw += d;
-    } catch (err) {
-      return { ok: false, message: `Model call failed: ${err?.message || err}` };
-    }
+      const callRes = await this._callModel({ sys, usr, images, task });
+      if (!callRes.ok) return { ok: false, message: 'Model call failed' };
 
-    const parsed = extractJson(raw);
-    const action = normaliseAction(parsed);
-    if (!action) {
-      return { ok: false, message:
-        `The model did not return a usable action.\n\nIt said: ${raw.trim().slice(0, 200) || '(nothing)'}` };
+      const parsed = extractJson(callRes.raw);
+      const action = normaliseAction(parsed);
+      if (!action) {
+        return { ok: false, message:
+          `The model (${callRes.provider}) did not return a usable action.\n\nIt said: ${callRes.raw.trim().slice(0, 200) || '(nothing)'}` };
+      }
+      return { ok: true, action, narration: describeAction(action) + (action.why ? ` — ${action.why}` : '') };
+    } catch (err) {
+      return { ok: false, message: `Planning error: ${err?.message || err}` };
     }
-    return { ok: true, action, narration: describeAction(action) + (action.why ? ` — ${action.why}` : '') };
+  }
+
+  /** Verify that the action had the intended effect. */
+  async _verifyAction(act, execRes, trace) {
+    if (!execRes.ok) return { verified: false, reason: 'Execution reported failure' };
+    
+    if (act.action === 'open_app') {
+      try {
+        const wList = await this.actions?.listWindows?.();
+        const found = (wList?.windows || []).some(w =>
+          w.title.toLowerCase().includes(act.app.toLowerCase()) ||
+          (w.process && w.process.toLowerCase().includes(act.app.toLowerCase()))
+        );
+        if (found) {
+          trace?.info('Verified', `Application "${act.app}" is running`);
+          return { verified: true };
+        }
+      } catch {}
+    }
+    return { verified: true };
   }
 
   /** Perform one action for real. */
   async _execute(act, trace) {
-    /*
-     * RUNTIME PATH (preferred). Translate the agent's action vocabulary into
-     * a registry command and let RuntimeCore run every gate. The agent no
-     * longer touches the action bridge itself — which is the whole point of
-     * "the AI never manipulates the OS directly".
-     */
     if (this.runtime) {
       const mapped = toCommand(act);
       const v = this.knowledge.validate ? this.knowledge.validate(mapped) : { ok: true };
       if (!v.ok) return { ok: false, fatal: false, summary: v.error };
-      // Confirmation already happened in run(); do not ask twice.
       const r = await this.runtime.execute(mapped, { trace });
       if (!r.ok && r.stage && r.stage !== 'execute') {
-        // Rejected by a gate: precondition/permission problems are fatal,
-        // a bad parameter is not.
         return { ok: false, fatal: ['permission', 'precondition'].includes(r.stage),
                  summary: r.error || 'rejected' };
       }

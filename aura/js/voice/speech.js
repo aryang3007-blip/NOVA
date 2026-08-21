@@ -289,12 +289,22 @@ export class SpeechInput {
       this._startedAt = Date.now();
       this._sawResultThisSession = false;
       state.set({ sttActive: true, micPermission: 'granted' });
+      this._armListeningTimeout();
       bus.emit(EV.STT_START, { mode: this.mode });
     };
 
     r.onresult = (event) => {
-      // Any result at all proves the mic really works, so this session counts
-      // as productive and the failure streak resets (bug #106).
+      // ── BARGE-IN INTERRUPTION ──
+      if (window.speechSynthesis && window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+        bus.emit(EV.TTS_INTERRUPT, { reason: 'barge-in' });
+      }
+
+      if (this._commandTimeout) {
+        clearTimeout(this._commandTimeout);
+        this._commandTimeout = null;
+      }
+
       this._sawResultThisSession = true;
       let interim = '';
       let final = '';
@@ -306,19 +316,12 @@ export class SpeechInput {
       }
       const confidence = event.results[event.results.length - 1]?.[0]?.confidence ?? 0;
 
-      // ── ECHO SUPPRESSION ────────────────────────────────────────────────
-      // Without this, the mic hears AURA's own TTS through the speakers,
-      // transcribes it, auto-sends it as a new question, AURA answers, the
-      // mic hears THAT... an endless self-conversation. This is the
-      // "app listens to what it says and gets stuck in a loop" bug.
-      // We drop anything captured while speaking, plus a short tail for the
-      // audio still in flight through the speakers.
-      // Three independent conditions, because each one alone has a hole:
-      //   muted        – set synchronously the instant TTS starts, so a result
-      //                  that Chrome delivers *after* recognition.stop() (stop
-      //                  is async and flushes buffered audio) is still caught.
-      //   ttsSpeaking  – state flag, covers TTS started elsewhere.
-      //   _spokeUntil  – tail window for audio still leaving the speakers.
+      // Stop command during playback or listening
+      if (/\b(stop|cancel|shut up|be quiet)\b/i.test(interim || final)) {
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        bus.emit(EV.TTS_INTERRUPT, { reason: 'stop-command' });
+      }
+
       const echoWindow = this.muted
         || state.get('ttsSpeaking')
         || Date.now() < (this._spokeUntil || 0);
@@ -327,7 +330,7 @@ export class SpeechInput {
           this._lastSuppressed = final.trim();
           bus.emit('voice:echo-suppressed', { text: final.trim(), reason: 'while-speaking' });
         }
-        return;                       // interim included: no caption flicker
+        return;
       }
 
       if (interim) {
@@ -339,8 +342,6 @@ export class SpeechInput {
 
       if (final.trim()) {
         const text = final.trim();
-        // Second line of defence: if the phrase closely matches what AURA
-        // just said, it is an echo, not the user.
         if (this._isEchoOfSelf(text)) {
           bus.emit('voice:echo-suppressed', { text });
           return;

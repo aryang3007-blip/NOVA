@@ -43,8 +43,9 @@
  * @module ai/screen-agent
  */
 
-import { ollama } from './providers.js';
+import { getProvider, ollama } from './providers.js';
 import { bus, EV } from '../core/bus.js';
+import { config } from '../core/config.js';
 
 /**
  * Small image→text / OCR-capable models, cheapest first. Matched against the
@@ -540,14 +541,34 @@ export class ScreenAgent {
       + `${GRID_COLS}x${GRID_ROWS} cells`);
 
     const sys = PLAN_SYSTEM(true);
-
     let raw = '';
+    const provId = config.get('visionProvider') || config.get('provider') || this.ai?.resolvedProvider || 'auto';
+    let p = provId !== 'auto' ? getProvider(provId) : null;
+    if (!p || provId === 'auto' || provId === 'local') {
+      const active = this.ai?.resolvedProvider && this.ai.resolvedProvider !== 'local' ? getProvider(this.ai.resolvedProvider) : null;
+      if (active && (!active.needsKey || config.getKey(active.id))) {
+        p = active;
+      } else {
+        const priorityOrder = ['gemini', 'openrouter', 'openai', 'groq', 'anthropic'];
+        for (const candidate of priorityOrder) {
+          const candProv = getProvider(candidate);
+          if (candProv && config.getKey(candidate)) {
+            p = candProv;
+            break;
+          }
+        }
+        if (!p) p = ollama;
+      }
+    }
+
+    const key = p.needsKey ? config.getKey(p.id) : undefined;
+    const modelToUse = (p.id === 'ollama') ? planner.name : (config.get('visionModel') || config.get('model') || p.defaultModel);
+
     try {
-      for await (const d of ollama.stream({
-        messages: [{ role: 'system', content: sys },
-                   { role: 'user', content: `Instruction: ${instruction}` }],
-        model: planner.name, images: [gridded], temperature: 0.1,
-      })) raw += d;
+      const messages = [{ role: 'system', content: sys }, { role: 'user', content: `Instruction: ${instruction}` }];
+      for await (const d of p.stream({ messages, model: modelToUse, key, images: [gridded], temperature: 0.1 })) {
+        raw += d;
+      }
     } catch (err) {
       trace?.fail('Planner', String(err?.message || err));
       return { ok: false, message: `Planning failed: ${err?.message || err}` };

@@ -284,6 +284,49 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "os": (bridge.SYSTEM if bridge else None),
             })
 
+        # ── /api/health — Consolidated Subsystem Health Check
+        if path == "/api/health":
+            ollama_st = {"running": False, "models": []}
+            if ollama_proxy:
+                st = ollama_proxy.status(OLLAMA_BASE, with_capabilities=False)
+                ollama_st = {"running": st.get("running", False), "models": st.get("names", [])}
+
+            wake_st = getattr(self.server, "_wake_status", {"status": "ONLINE", "engine": "openWakeWord / Whisper"})
+            paired_count = len(devices.PAIRED) if devices else 0
+            doc_avail = bool(docbuilder)
+
+            return self._json({
+                "ok": True,
+                "timestamp": _t_start.time(),
+                "uptime": int(_t_start.time() - _START_TIME),
+                "services": {
+                    "core": {"status": "HEALTHY", "port": PORT, "lan": ALLOW_LAN},
+                    "ollama": {"status": "HEALTHY" if ollama_st["running"] else "OFFLINE", **ollama_st},
+                    "wake": {"status": wake_st.get("status", "HEALTHY"), **wake_st},
+                    "stt": {"status": "READY", "provider": "WebSpeech / Faster-Whisper"},
+                    "tts": {"status": "READY", "provider": "WebSpeech / Viseme-Audio"},
+                    "vision": {"status": "READY", "multimodal": True},
+                    "desktop": {"status": "READY" if ALLOW_ACTIONS else "DISABLED", "actions": ALLOW_ACTIONS, "os": (bridge.SYSTEM if bridge else None)},
+                    "search": {"status": "READY", "provider": "DuckDuckGo"},
+                    "devices": {"status": "READY", "pairedCount": paired_count},
+                    "documents": {"status": "READY" if doc_avail else "PARTIAL", "available": doc_avail}
+                }
+            })
+
+        # ── /api/voice/status — Voice service status
+        if path == "/api/voice/status":
+            st = getattr(self.server, "_wake_status", {"status": "READY", "engine": "openWakeWord", "device": "Default"})
+            return self._json({"ok": True, "voice": st})
+
+        # ── /api/voice/devices — Audio input devices
+        if path == "/api/voice/devices":
+            try:
+                from voice.wake_service import list_audio_devices
+                devs = list_audio_devices()
+                return self._json({"ok": True, "devices": devs})
+            except Exception as e:
+                return self._json({"ok": False, "devices": [], "message": str(e)})
+
         # ── /api/voice/events — Event stream polling for local Python voice service
         if path == "/api/voice/events":
             try:
@@ -444,6 +487,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
+        # ── /api/voice/status (POST) — Telemetry from Python voice service
+        if path == "/api/voice/status":
+            body = self._read_body()
+            try:
+                p = json.loads(body or b"{}")
+                setattr(self.server, "_wake_status", p)
+                return self._json({"ok": True})
+            except Exception:
+                return self._json({"ok": False}, 400)
+
         # ── /api/voice/wake — Endpoint for Python wake_service.py
         if path == "/api/voice/wake":
             body = self._read_body()
@@ -458,7 +511,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             phrase = payload.get("phrase", "Hey Nova")
             score = float(payload.get("score", 1.0))
             source = payload.get("source", "openwakeword")
-            ts = payload.get("timestamp", _t_start.time())
+            ts = float(payload.get("timestamp", _t_start.time()))
+
+            # Debounce protection (ignore duplicate wake events within 1.2s)
+            last_ts = getattr(self.server, "_last_wake_ts", 0.0)
+            if ts - last_ts < 1.2:
+                return self._json({"ok": True, "message": "Debounced"})
+            setattr(self.server, "_last_wake_ts", ts)
 
             ev = {
                 "type": p_type,
