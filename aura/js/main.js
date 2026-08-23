@@ -654,11 +654,12 @@ class AuraApp {
       } else {
         // Wake word only (e.g. "AURA" or "Hey Nova")
         this.setStatus('LISTENING');
-        const greetings = ['Yes, Commander?', 'Listening...', 'How can I assist?', 'Online.'];
+        const greetings = [config.get('commanderGreeting') || 'Yes, Commander?', 'Listening...', 'How can I assist?', 'Online.'];
         const greet = greetings[Math.floor(Math.random() * greetings.length)];
 
         // Speak greeting
-        this.voice.output.speak(greet, { emotion: 'happy' });
+        const emotion = greet.includes('Commander') ? 'questioning' : 'happy';
+        this.voice.output.speak(greet, { emotion });
 
         // Once greeting finishes, switch to active command listening
         const onGreetingDone = () => {
@@ -1003,6 +1004,7 @@ class AuraApp {
       this.voice.output.speak('AURA voice system online. All modules nominal, Commander.'));
     bindText('set-sttlang', 'sttLang');
     bindCheck('set-autosend', 'autoSendOnFinal');
+    bindText('set-commander-greeting', 'commanderGreeting');
     bindCheck('set-wake', 'wakeWordEnabled', (v) => this.setWakeWord(v));
     bindText('set-wakeword', 'wakeWord');
 
@@ -1188,6 +1190,7 @@ class AuraApp {
     $('set-vol').value = c.ttsVolume; $('lbl-vol').textContent = Number(c.ttsVolume).toFixed(2);
     $('set-sttlang').value = c.sttLang;
     $('set-autosend').checked = c.autoSendOnFinal;
+    $('set-commander-greeting').value = c.commanderGreeting || 'Yes, Commander?';
     $('set-wake').checked = c.wakeWordEnabled;
     if ($('set-wakeword')) $('set-wakeword').value = c.wakeWord || '';
     this._renderWakeTags?.();

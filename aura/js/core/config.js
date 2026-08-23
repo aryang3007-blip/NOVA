@@ -48,6 +48,8 @@ const DEFAULTS = {
   wakeWordEnabled: false,
   wakeWord: 'aura, hey aura, nova, hey nova, jarvis, computer',
   autoSendOnFinal: true,
+  commanderGreeting: 'Yes, Commander?',
+  commanderGreetingTone: 'questioning',
 
   // ── Porcupine wake-word engine ────────────────────────────────────────
   // Get a free access key at https://console.picovoice.ai/

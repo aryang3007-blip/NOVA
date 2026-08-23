@@ -738,6 +738,7 @@ export class SpeechOutput {
       u.volume = clampNum(config.get('ttsVolume'), 0, 1, 1);
       if (emotion === 'excited') { u.rate *= 1.08; u.pitch *= 1.06; }
       if (emotion === 'sad') { u.rate *= 0.92; u.pitch *= 0.94; }
+      if (emotion === 'questioning') { u.pitch *= 1.08; }
 
       const words = clean.split(/\s+/).filter(Boolean);
       let wordIndex = 0;
