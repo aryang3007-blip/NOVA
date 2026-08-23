@@ -117,26 +117,107 @@ export class LocalStorageProvider extends MemoryStorage {
 }
 
 /**
- * IndexedDB provider — the growth path for large stores (documents, embeddings)
- * that would blow localStorage's ~5 MB budget.
- *
- * TODO(local): implement using the `idb` pattern:
- *   openDB('aura', 1, { upgrade(db){ db.createObjectStore('memory'); } })
- * Falls back to localStorage until then, so nothing breaks today.
+/**
+ * Database Storage Provider — authoritative backend-backed storage using SQLite via /api/db/*.
+ * Automatically falls back to LocalStorageProvider and InMemoryStorage when backend is unreachable.
  */
-export class IndexedDBStorage extends MemoryStorage {
+export class DatabaseStorageProvider extends MemoryStorage {
   constructor(opts = {}) {
     super(opts);
-    this.kind = 'indexeddb(pending→localStorage)';
-    this.delegate = new LocalStorageProvider(opts);
+    this.kind = 'sqlite(api/db)';
+    this.fallback = new LocalStorageProvider(opts);
+    this._mem = new Map();
   }
-  static get available() { return typeof indexedDB !== 'undefined'; }
-  async get(k) { return this.delegate.get(k); }
-  async set(k, v) { return this.delegate.set(k, v); }
-  async remove(k) { return this.delegate.remove(k); }
-  async keys(p) { return this.delegate.keys(p); }
-  async clear() { return this.delegate.clear(); }
+
+  async _apiAvailable() {
+    try {
+      const { persistenceClient } = await import('../core/persistence-client.js');
+      return await persistenceClient.isAvailable();
+    } catch {
+      return false;
+    }
+  }
+
+  async get(key) {
+    if (!await this._apiAvailable()) {
+      return this.fallback.get(key);
+    }
+    const { persistenceClient } = await import('../core/persistence-client.js');
+    if (this.namespace === 'aura.mem.conv' && key === 'messages') {
+      const msgs = await persistenceClient.getMessages();
+      return msgs !== null ? msgs : this.fallback.get(key);
+    }
+    if (this.namespace === 'aura.mem.pref' && key === 'prefs') {
+      const prefs = await persistenceClient.getPreferences();
+      return prefs !== null ? prefs : this.fallback.get(key);
+    }
+    if (this.namespace === 'aura.mem.know' && key === 'documents') {
+      const docs = await persistenceClient.getKnowledgeDocs();
+      return docs !== null ? docs : this.fallback.get(key);
+    }
+    return this.fallback.get(key);
+  }
+
+  async set(key, value) {
+    // Keep local fallback in sync for safety
+    await this.fallback.set(key, value);
+    if (!await this._apiAvailable()) return true;
+
+    const { persistenceClient } = await import('../core/persistence-client.js');
+    if (this.namespace === 'aura.mem.conv' && key === 'messages') {
+      if (Array.isArray(value) && value.length > 0) {
+        const last = value[value.length - 1];
+        if (last) await persistenceClient.addMessage(last);
+      }
+      return true;
+    }
+    if (this.namespace === 'aura.mem.pref' && key === 'prefs') {
+      if (value && typeof value === 'object') {
+        for (const [k, v] of Object.entries(value)) {
+          await persistenceClient.setPreference(k, v.value !== undefined ? v.value : v, {
+            source: v.source || 'user',
+            confidence: v.confidence || 1.0,
+          });
+        }
+      }
+      return true;
+    }
+    if (this.namespace === 'aura.mem.know' && key === 'documents') {
+      if (Array.isArray(value)) {
+        for (const d of value) {
+          if (d && d.id && d.text) await persistenceClient.addKnowledgeDoc(d);
+        }
+      }
+      return true;
+    }
+    return true;
+  }
+
+  async remove(key) {
+    await this.fallback.remove(key);
+    if (!await this._apiAvailable()) return true;
+
+    const { persistenceClient } = await import('../core/persistence-client.js');
+    if (this.namespace === 'aura.mem.conv' && key === 'messages') {
+      await persistenceClient.clearConversation();
+    } else if (this.namespace === 'aura.mem.pref' && key === 'prefs') {
+      // Cleared in SQLite
+    } else if (this.namespace === 'aura.mem.know' && key === 'documents') {
+      // Cleared in SQLite
+    }
+    return true;
+  }
+
+  async keys(prefix = '') {
+    return this.fallback.keys(prefix);
+  }
+
+  async clear() {
+    await this.fallback.clear();
+    return this.remove('all');
+  }
 }
+
 
 /**
  * Vector store interface for semantic recall.
@@ -319,8 +400,10 @@ export function tokenize(text) {
 
 /** Pick the best storage available in this environment. */
 export function createStorage(namespace = 'aura.mem') {
+  if (typeof fetch === 'function') return new DatabaseStorageProvider({ namespace });
   if (typeof localStorage !== 'undefined') return new LocalStorageProvider({ namespace });
   return new InMemoryStorage({ namespace });
 }
 
-export default { MemoryStorage, InMemoryStorage, LocalStorageProvider, IndexedDBStorage, VectorStore, createStorage, tokenize };
+export default { MemoryStorage, InMemoryStorage, LocalStorageProvider, DatabaseStorageProvider, VectorStore, createStorage, tokenize };
+

@@ -152,12 +152,24 @@ if ALLOW_ACTIONS:
         say(f"  !! bridge.py failed to import: {e}")
         ALLOW_ACTIONS = False
 
+# ── Persistence & Database Manager (SQLite + DPAPI Vault) ─────────────────
+try:
+    from persistence import db_manager, credential_vault
+    from persistence.importer import seed_wake_phrases_from_file
+    from persistence.api import PersistenceAPIHandler
+    _db_init_info = db_manager.initialize()
+    seed_wake_phrases_from_file()
+except Exception as e:
+    _db_init_info = {"ok": False, "error": str(e)}
+    say(c(31, f"  !! Persistence subsystem failed to initialize: {e}"))
+
 
 FAVICON_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <circle cx="50" cy="50" r="44" fill="#04121f" stroke="#22d3ee" stroke-width="4"/>
   <circle cx="50" cy="50" r="28" fill="none" stroke="#3b82f6" stroke-width="3" stroke-dasharray="14 8"/>
   <circle cx="50" cy="50" r="12" fill="#f59e0b"/>
 </svg>"""
+
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -201,8 +213,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
 
+        # ── Database & Persistence API
+        if path.startswith("/api/db/"):
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                data, code = PersistenceAPIHandler.handle_get(path, q)
+                return self._json(data, code)
+            except Exception as e:
+                return self._json({"ok": False, "message": f"Database error: {e}"}, 500)
+
         # ── favicon
         if path in ("/favicon.ico", "/favicon.svg", "/favicon.png", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):
+
             self.send_response(200)
             self.send_header("Content-Type", "image/svg+xml")
             self.send_header("Content-Length", str(len(FAVICON_SVG)))
@@ -487,8 +509,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
+        # ── Database & Persistence API (POST)
+        if path.startswith("/api/db/"):
+            body = self._read_body(limit=5 << 20)
+            try:
+                p = json.loads(body or b"{}")
+            except Exception:
+                p = {}
+            try:
+                data, code = PersistenceAPIHandler.handle_post(path, p)
+                return self._json(data, code)
+            except Exception as e:
+                return self._json({"ok": False, "message": f"Database error: {e}"}, 500)
+
         # ── /api/voice/status (POST) — Telemetry from Python voice service
         if path == "/api/voice/status":
+
             body = self._read_body()
             try:
                 p = json.loads(body or b"{}")
@@ -667,7 +703,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         say(f"  {icon} ACTION {action} {detail} -> {result.get('message', '')}")
         return self._json(result)
 
+    def do_DELETE(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/db/"):
+            q = parse_qs(urlparse(self.path).query)
+            body = self._read_body()
+            try:
+                p = json.loads(body or b"{}")
+            except Exception:
+                p = {}
+            try:
+                data, code = PersistenceAPIHandler.handle_delete(path, q, p)
+                return self._json(data, code)
+            except Exception as e:
+                return self._json({"ok": False, "message": f"Database error: {e}"}, 500)
+        return self._json({"ok": False, "message": "Not found"}, 404)
+
     def do_OPTIONS(self):
+
         # No CORS allow-origin on purpose → cross-site preflight fails.
         self.send_response(204)
         self.end_headers()

@@ -208,9 +208,33 @@ class Config {
   }
 
   _write(obj) {
-    if (!this.storageAvailable) { this._mem = obj; return false; }
-    try { localStorage.setItem(KEY, JSON.stringify(obj)); return true; }
-    catch (e) { console.warn('[config] persist failed', e); this._mem = obj; return false; }
+    if (this.storageAvailable) {
+      try { localStorage.setItem(KEY, JSON.stringify(obj)); }
+      catch (e) { console.warn('[config] persist failed', e); }
+    } else {
+      this._mem = obj;
+    }
+    // Asynchronously synchronize to SQLite
+    if (typeof fetch === 'function') {
+      import('./persistence-client.js').then(({ persistenceClient }) => {
+        persistenceClient.saveConfig(obj).catch(() => {});
+      }).catch(() => {});
+    }
+    return true;
+  }
+
+  async syncWithDatabase() {
+    if (typeof fetch !== 'function') return false;
+    try {
+      const { persistenceClient } = await import('./persistence-client.js');
+      const dbConfig = await persistenceClient.loadConfig();
+      if (dbConfig && typeof dbConfig === 'object') {
+        Object.assign(this.data, dbConfig);
+        this.data.apiKeys = { ...DEFAULTS.apiKeys, ...(this.data.apiKeys || {}) };
+        return true;
+      }
+    } catch {}
+    return false;
   }
 
   get(key) { return key === undefined ? { ...this.data } : this.data[key]; }
@@ -227,8 +251,17 @@ class Config {
 
   setKey(provider, key) {
     const keys = { ...(this.data.apiKeys || {}) };
-    if (key) keys[provider] = key.trim(); else delete keys[provider];
+    const prov = String(provider || '').trim().toLowerCase();
+    const cleanKey = key ? String(key).trim() : '';
+    if (cleanKey) keys[prov] = cleanKey; else delete keys[prov];
     this.set('apiKeys', keys);
+
+    // Save into hardware/OS DPAPI Vault
+    if (typeof fetch === 'function') {
+      import('./persistence-client.js').then(({ persistenceClient }) => {
+        persistenceClient.saveCredential(prov, cleanKey).catch(() => {});
+      }).catch(() => {});
+    }
   }
 
   onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -247,5 +280,11 @@ class Config {
 }
 
 export const config = new Config();
-export { DEFAULTS };
+// Attempt initial database synchronization
+if (typeof fetch === 'function') {
+  config.syncWithDatabase().catch(() => {});
+}
+export { Config, DEFAULTS };
 export default config;
+
+

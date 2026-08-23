@@ -72,6 +72,18 @@ def log(tag, message):
 
 
 def load_config():
+    # 1. Try SQLite repository
+    try:
+        from persistence.repositories import wake_repo
+        phrases = wake_repo.get_all_phrases()
+        if phrases and len(phrases) > 0:
+            cfg = dict(DEFAULT_CONFIG)
+            cfg["phrases"] = phrases
+            return cfg
+    except Exception:
+        pass
+
+    # 2. Fallback to wake_phrases.json
     if not CONFIG_FILE.exists():
         try:
             CONFIG_FILE.write_text(json.dumps(DEFAULT_CONFIG, indent=4), encoding="utf-8")
@@ -88,6 +100,7 @@ def load_config():
     except Exception as e:
         log("WAKE", f"Config load error: {e}. Using defaults.")
         return DEFAULT_CONFIG
+
 
 
 def list_audio_devices():

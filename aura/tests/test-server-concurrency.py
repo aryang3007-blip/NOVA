@@ -27,7 +27,16 @@ import urllib.request
 import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+for stream in ("stdout", "stderr"):
+    s = getattr(sys, stream, None)
+    try:
+        if s and hasattr(s, "reconfigure"):
+            s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 pass_n = 0
 fail_n = 0
