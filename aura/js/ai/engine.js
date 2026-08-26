@@ -717,6 +717,18 @@ export class AIEngine {
         targetProvider = curP;
         targetModel = vModelPref || this.resolvedModel || getProvider(curP)?.defaultModel;
       }
+      // Chat is running locally but another provider HAS a key — use that.
+      // (Otherwise a screenshot went to a local model even though the user
+      // configured cloud vision, which read as "not sending screenshots to
+      // the API model".)
+      if (!targetProvider) {
+        for (const id of ['gemini', 'openrouter', 'openai', 'groq', 'anthropic']) {
+          if (!config.getKey(id)) continue;
+          targetProvider = id;
+          targetModel = vModelPref || getProvider(id)?.defaultModel;
+          break;
+        }
+      }
     }
 
     if (targetProvider) {

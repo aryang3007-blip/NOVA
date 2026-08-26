@@ -56,13 +56,13 @@ export class PersistenceClient {
 
   /* ── VAULT (CREDENTIALS) ──────────────────────────────────────────── */
 
-  async saveCredential(provider, key) {
+  async saveCredential(provider, key, profile = null) {
     if (!await this.isAvailable()) return false;
     try {
       const res = await this._fetch(`${this.baseUrl}/api/db/vault`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, key }),
+        body: JSON.stringify(profile ? { provider, key, profile } : { provider, key }),
       });
       return res.ok;
     } catch {
@@ -79,6 +79,42 @@ export class PersistenceClient {
       return data.providers || {};
     } catch {
       return {};
+    }
+  }
+
+  /**
+   * Metadata for every stored key profile ({ profile: { provider: meta } }).
+   * Never contains plaintext — used to offer "import keys from which
+   * profile?" when a fresh browser session has no keys of its own.
+   */
+  async getVaultProfiles() {
+    if (!await this.isAvailable()) return {};
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/vault/profiles`, { cache: 'no-store' });
+      if (!res.ok) return {};
+      const data = await res.json();
+      return data.profiles || {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Explicit import: fetch the PLAINTEXT keys of one profile so config can
+   * repopulate a fresh browser session. Localhost-only, owner-initiated.
+   */
+  async revealCredentials({ profile = null, provider = null } = {}) {
+    if (!await this.isAvailable()) return null;
+    try {
+      const qs = new URLSearchParams();
+      if (profile) qs.set('profile', profile);
+      if (provider) qs.set('provider', provider);
+      const res = await this._fetch(`${this.baseUrl}/api/db/vault/reveal?${qs}`, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.keys || null;
+    } catch {
+      return null;
     }
   }
 

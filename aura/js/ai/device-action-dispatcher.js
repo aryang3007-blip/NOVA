@@ -7,8 +7,11 @@
  * @module ai/device-action-dispatcher
  */
 
-import { bus } from '../core/bus.js';
-import { notify } from '../ui/dev-notify.js';
+import { bus, EV } from '../core/bus.js';
+
+// Layer rule: js/ai (L4) must not import js/ui (L6). Notifications cross the
+// boundary as a bus event; js/ui/dev-notify.js subscribes and renders them.
+const notify = (opts) => bus.emit('ui:notify', opts);
 
 /**
  * Map of device action names to handler functions.
@@ -39,7 +42,7 @@ export async function dispatchDeviceAction(action, params, { devices = null, bri
   function log(msg, data = null) {
     const entry = { at: performance.now() - startTime, msg, data };
     traceLog.push(entry);
-    console.log(`[device-dispatcher] ${msg}`, data || '');
+    bus.emit(EV.LOG, { text: `[device-dispatcher] ${msg}`, kind: 'info', data });
   }
 
   log('Dispatch start', { action, params });

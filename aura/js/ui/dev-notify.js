@@ -263,6 +263,9 @@ function escapeHtml(str) {
  * Hook into the event bus to auto-notify on certain events.
  */
 export function hookBusEvents() {
+  // Lower layers (js/ai, js/core) surface user-visible notifications through
+  // this event instead of importing this module directly (layer discipline).
+  bus.on('ui:notify', (opts) => { try { notify(opts); } catch {} });
   bus.on(EV.ERROR, (err) => {
     const message = err?.message || String(err);
     const trace = err?.stack || JSON.stringify(err, null, 2);

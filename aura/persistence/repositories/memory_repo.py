@@ -9,12 +9,33 @@ and face landmark biometric signatures.
 import json
 import math
 import struct
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from ..db import db_manager
 
 
 class MemoryRepository:
+    # Millisecond timestamps collide for rapid same-role inserts (two turns
+    # within 1 ms silently merged via ON CONFLICT — that was the failing
+    # "Stored 3 conversation messages" test). Nanosecond clock + a counter
+    # that bumps whenever the clock fails to advance = unique + ordered ids.
+    _id_lock = threading.Lock()
+    _id_counter = 0
+    _id_last_ns = 0
+
+    @classmethod
+    def _new_id(cls, role: str = "msg") -> str:
+        ns = time.time_ns()
+        with cls._id_lock:
+            if ns <= cls._id_last_ns:
+                cls._id_counter += 1
+            else:
+                cls._id_counter = 0
+                cls._id_last_ns = ns
+            seq = cls._id_counter
+        return f"{ns}-{seq}-{role}"
+
     def __init__(self, manager=None):
         self.manager = manager or db_manager
 
@@ -24,7 +45,7 @@ class MemoryRepository:
                     pinned: bool = False, msg_id: Optional[str] = None) -> Dict[str, Any]:
         conn = self.manager.get_connection()
         now = time.time()
-        mid = msg_id or f"{int(now * 1000)}-{role}"
+        mid = msg_id or self._new_id(role)
         with conn:
             conn.execute(
                 """
@@ -313,7 +334,7 @@ class MemoryRepository:
                        ep_id: Optional[str] = None) -> Dict[str, Any]:
         conn = self.manager.get_connection()
         now = time.time()
-        eid = ep_id or f"ep_{int(now * 1000)}"
+        eid = ep_id or f"ep_{self._new_id()}"
         with conn:
             conn.execute(
                 """

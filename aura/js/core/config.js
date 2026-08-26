@@ -14,6 +14,12 @@ const DEFAULTS = {
   provider: 'auto',            // auto | local | openai | anthropic | gemini | groq | openrouter | ollama
   model: '',                   // '' = provider default
   apiKeys: {},                 // { openai: 'sk-...', ... }
+  // ── Key vault profiles ────────────────────────────────────────────────
+  // Keys are mirrored server-side into the DPAPI vault (never the SQLite
+  // config row) under a NAMED profile. A fresh browser session — empty
+  // localStorage — can then import them back instead of making you re-paste.
+  keyProfile: 'default',       // which vault profile setKey() writes to
+  autoImportKeys: true,        // fresh sessions auto-import keys from the vault
   ollamaUrl: 'http://localhost:11434',
   // Hybrid routing: send short/simple turns to a local Ollama model (free,
   // private, fast) and only escalate hard ones to the cloud provider.
@@ -256,12 +262,76 @@ class Config {
     if (cleanKey) keys[prov] = cleanKey; else delete keys[prov];
     this.set('apiKeys', keys);
 
-    // Save into hardware/OS DPAPI Vault
+    // Save into hardware/OS DPAPI Vault under the active profile
     if (typeof fetch === 'function') {
+      const profile = this.data.keyProfile || 'default';
       import('./persistence-client.js').then(({ persistenceClient }) => {
-        persistenceClient.saveCredential(prov, cleanKey).catch(() => {});
+        persistenceClient.saveCredential(prov, cleanKey, profile).catch(() => {});
       }).catch(() => {});
     }
+  }
+
+  /**
+   * Repopulate apiKeys from the server-side vault. Called automatically on
+   * boot when this browser has no keys of its own (fresh profile/session);
+   * also callable directly to switch profiles.
+   *
+   * Profile choice: the configured `keyProfile` wins if it holds keys, else
+   * 'default', else whichever profile stores the most providers.
+   *
+   * @param {{force?:boolean, profile?:string}} [opts]
+   *   force   — import even though this browser already has keys locally
+   *   profile — import from exactly this profile (also becomes keyProfile)
+   * @returns {Promise<number>} how many provider keys were imported
+   */
+  async restoreKeysFromVault({ force = false, profile = null } = {}) {
+    if (typeof fetch !== 'function') return 0;
+    if (!force && this.data.autoImportKeys === false) return 0;
+    const local = this.data.apiKeys || {};
+    if (!force && Object.values(local).some(k => typeof k === 'string' && k.trim())) return 0;
+    try {
+      const { persistenceClient } = await import('./persistence-client.js');
+      const profiles = await persistenceClient.getVaultProfiles();
+      const names = Object.keys(profiles || {});
+      if (!names.length) return 0;
+
+      let chosen = profile;
+      if (!chosen) {
+        const wanted = this.data.keyProfile || 'default';
+        if (names.includes(wanted)) chosen = wanted;
+        else if (names.includes('default')) chosen = 'default';
+        else chosen = names.sort((a, b) =>
+          Object.keys(profiles[b] || {}).length - Object.keys(profiles[a] || {}).length)[0];
+      }
+
+      const keys = await persistenceClient.revealCredentials({ profile: chosen });
+      if (!keys || !Object.keys(keys).length) return 0;
+
+      const merged = { ...(this.data.apiKeys || {}) };
+      let imported = 0;
+      for (const [prov, k] of Object.entries(keys)) {
+        if (!k || typeof k !== 'string') continue;
+        if (!force && merged[prov]) continue;          // local wins unless forced
+        merged[prov] = k.trim();
+        imported++;
+      }
+      this.set({ apiKeys: merged, ...(profile ? { keyProfile: chosen } : {}) });
+      try {
+        const { bus } = await import('./bus.js');
+        bus.emit('config:keys-imported', { profile: chosen, count: imported });
+      } catch {}
+      return imported;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * User-facing profile switch: pull keys from a named profile, replacing
+   * this browser's current set, and make it the profile setKey() writes to.
+   */
+  async importKeysFromProfile(name) {
+    return this.restoreKeysFromVault({ force: true, profile: String(name || '').trim().toLowerCase() || null });
   }
 
   onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -280,9 +350,16 @@ class Config {
 }
 
 export const config = new Config();
-// Attempt initial database synchronization
+// Attempt initial database synchronization, then recover API keys from the
+// vault when this browser has none (new session/profile). Keys live in the
+// DPAPI vault file, not the DB row — so this runs even if the config row is
+// missing or empty.
 if (typeof fetch === 'function') {
-  config.syncWithDatabase().catch(() => {});
+  config.syncWithDatabase()
+    .catch(() => {})
+    .then(() => config.restoreKeysFromVault())
+    .then(n => { if (n) console.info(`[config] imported ${n} API key(s) from the vault`); })
+    .catch(() => {});
 }
 export { Config, DEFAULTS };
 export default config;
