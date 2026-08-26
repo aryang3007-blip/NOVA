@@ -11,33 +11,59 @@
  * in content. So a model that hallucinates cannot write `C:\Windows\evil.exe`;
  * the worst it can do is produce a badly-worded slide.
  *
- * WORKS WITH WHATEVER YOU HAVE
- * ----------------------------
- * Ollama, Gemini, OpenRouter, or nothing at all. The provider is whatever the
- * engine already resolved, so a free Gemini key and a local gemma both work
- * without a second configuration.
+ * PROVIDER TRUTH (spec §13)
+ * -------------------------
+ * Generation goes through `router.completeJSON` — the ONE place that reads
+ * the UI's selected provider/model (Gemini → Gemini, Groq → Groq, Ollama only
+ * when Ollama is what the UI says). The old implementation read
+ * `resolvedProvider.id` off a plain string, always got `undefined`, and
+ * silently used the offline template. That is why decks came out as empty
+ * skeletons "somehow never using the API model".
+ *
+ * QUALITY PIPELINE (spec §10)
+ * ---------------------------
+ *   understand topic (count, audience, purpose)
+ *   → optional research digest (only when the topic needs current facts)
+ *   → model writes a STRUCTURED deck spec (narrative arc, per-slide layout)
+ *   → validateDeck: slide count, content on every slide, arc completeness
+ *   → repairDeck: weak slides regenerated once via the model
+ *   → docbuilder renders + re-validates the FILE itself
  *
  * AND IF THERE IS NO MODEL
  * ------------------------
  * `outlineFallback()` builds a real, honestly-labelled skeleton from the
  * prompt itself. It does not pretend a model wrote it — the deck says so on
- * the title slide. A user with no key and no Ollama still gets a usable file
- * instead of an error, which is the difference between a tool and a demo.
+ * the title slide.
  *
  * @module ai/doc-agent
  */
 
-import { extractJson } from './screen-agent.js';
-import { config } from '../core/config.js';
-import { PROVIDERS, ollama } from './providers.js';
+import * as router from './router.js';
 
 /** Document kinds and how to ask a model for each. */
 export const DOC_KINDS = {
   pptx: {
     label: 'Presentation', ext: '.pptx', icon: '📊',
-    schema: '{"title":"…","subtitle":"…","slides":[{"title":"…","bullets":["…","…"],"notes":"…"}]}',
-    rules: '6–10 slides. 3–5 short bullets per slide, each under 14 words. '
-         + 'No sentences that run past one line. Include a closing slide.',
+    schema:
+      '{"title":"…","subtitle":"…","theme":"professional-dark|professional-light|academic|minimal",'
+      + '"audience":"…","slides":[{"kind":"title|section|bullets|two-column|process|timeline|stats|'
+      + 'comparison|quote|conclusion|references","title":"…","purpose":"…",'
+      + '"bullets":["…"],"columns":{"left":{"title":"…","bullets":["…"]},"right":{"title":"…","bullets":["…"]}},'
+      + '"steps":["…"],"timeline":[{"label":"…","text":"…"}],"stats":[{"value":"…","label":"…"}],'
+      + '"table":{"columns":["…"],"rows":[["…"]]},"quote":"…","attribution":"…",'
+      + '"visual":"what imagery/diagram would support this slide","notes":"speaker notes"}]}',
+    rules:
+      'Tell a coherent STORY, not a list of headings. Default 8–12 content slides unless a count '
+      + 'was requested — honor a requested count within ±1. Slide 1 is kind "title" (include a '
+      + 'subtitle with audience/purpose), the LAST two are "conclusion" then "references". '
+      + 'Every slide needs a "purpose" (why this slide exists), pick the "kind" that FITS the '
+      + 'content: comparisons → two-column/comparison with "columns" or "table", sequences → '
+      + '"process" with 3–6 "steps", chronology → "timeline", numbers → "stats" with 2–4 entries. '
+      + 'Every content slide: 3–5 bullets of 8–18 words each with REAL information — no filler, '
+      + 'no restating the title, no empty sections. Every slide gets speaker "notes" (2–4 '
+      + 'sentences the presenter would SAY, adding context beyond the bullets). Vary the kinds: '
+      + 'at least 3 different content layouts across the deck. No invented statistics, dates or '
+      + 'quotes — prefer true general statements over false precision.',
   },
   xlsx: {
     label: 'Spreadsheet', ext: '.xlsx', icon: '📈',
@@ -49,7 +75,7 @@ export const DOC_KINDS = {
     label: 'Document', ext: '.docx', icon: '📝',
     schema: '{"title":"…","subtitle":"…","sections":[{"heading":"…","level":1,'
           + '"paragraphs":["…"],"bullets":["…"]}]}',
-    rules: '4–8 sections. Each has a heading and 1–3 paragraphs. '
+    rules: '4–8 sections. Each has a heading and 1–3 paragraphs of real content. '
          + 'Use bullets only where a list genuinely helps.',
   },
 };
@@ -59,7 +85,7 @@ export const DOC_KINDS = {
  * @type {Array<[RegExp, string]>}
  */
 const TRIGGERS = [
-  [/\b(ppt|pptx|power\s*point|powerpoint|slide\s*deck|presentation|deck)\b/i, 'pptx'],
+  [/\b(ppt|pptx|power\s*point|powerpoint|slide\s*deck|presentation|deck|slides?)\b/i, 'pptx'],
   [/\b(xlsx|excel|spread\s*sheet|spreadsheet|workbook|csv\s*sheet)\b/i, 'xlsx'],
   [/\b(docx|word\s*doc|word\s*document|write\s*(?:me\s*)?an?\s*(?:report|essay|doc)|report|essay|letter)\b/i, 'docx'],
 ];
@@ -67,13 +93,13 @@ const TRIGGERS = [
 /**
  * Does this message ask for a document? Pure, so it unit-tests trivially.
  * @param {string} text
- * @returns {{kind:string, topic:string}|null}
+ * @returns {{kind:string, topic:string, slides?:number, audience?:string}|null}
  */
 export function detectDocRequest(text) {
   const t = String(text || '').trim();
   if (!t) return null;
   // Must look like an instruction, not a question ABOUT presentations.
-  if (!/\b(make|create|build|generate|write|prepare|draft|do)\b/i.test(t)) return null;
+  if (!/\b(make|create|build|generate|write|prepare|draft|do|give|design)\b/i.test(t)) return null;
 
   for (const [re, kind] of TRIGGERS) {
     const m = re.exec(t);
@@ -84,90 +110,232 @@ export function detectDocRequest(text) {
     if (on) topic = on[1];
     else {
       topic = t.replace(re, ' ')
-               .replace(/\b(make|create|build|generate|write|prepare|draft|do|me|a|an|the|please)\b/gi, ' ')
+               .replace(/\b(make|create|build|generate|write|prepare|draft|do|give|design|me|a|an|the|please)\b/gi, ' ')
                .replace(/\s+/g, ' ').trim();
     }
+    // "for Class 10" at the END is the audience, not the topic.
+    let audience = '';
+    const aud = /\bfor\s+([^,.]+(?:class\s*\d+|students?|beginners?|kids|investors?|executives?|college|school|teachers?|professionals?|experts?|audience)[^,.]*)$/i.exec(topic);
+    if (aud) {
+      audience = aud[1].trim();
+      topic = topic.slice(0, aud.index).trim().replace(/\b(for|to)\s*$/i, '');
+    }
     topic = topic.replace(/[.!?]+$/, '').trim();
-    return { kind, topic: topic || 'Untitled' };
+
+    // "a 10-slide presentation" / "10 slides on X"
+    const num = /\b(\d{1,2})\s*[- ]\s*(?:slides?|pages?)\b/i.exec(t);
+    return { kind, topic: topic || 'Untitled',
+             ...(num ? { slides: Math.min(30, Math.max(3, parseInt(num[1], 10))) } : {}),
+             ...(audience ? { audience } : {}) };
   }
   return null;
 }
 
-const SYS = (kind) => {
+/**
+ * Does this topic need live research first? (spec §15) Static/general topics
+ * must NOT trigger a search — quantum computing basics are knowable; "today's
+ * AI news" is not.
+ */
+export function needsResearch(text) {
+  const t = String(text || '');
+  return /\b(today|tonight|this (week|month|year)|latest|recent|current|currently|news|update[ds]?|202[4-9]|price|stock|market|score|weather|who won|announce[ds]?|release[d]?)\b/i.test(t);
+}
+
+const SYS = (kind, { slides = 0, audience = '' } = {}) => {
   const k = DOC_KINDS[kind];
-  return 'You are a document outliner. Reply with ONE JSON object and nothing '
-    + 'else — no prose, no markdown fence, no explanation.\n\n'
+  return (kind === 'pptx'
+    ? 'You are a world-class presentation designer (think Gamma/McKinsey decks). '
+    : 'You are a document outliner. ')
+    + 'Reply with ONE JSON object and nothing else — no prose, no markdown fence, no explanation.\n\n'
     + `Shape: ${k.schema}\n\n`
     + `Rules: ${k.rules}\n`
-    + 'Every string must be plain text. Do not invent statistics, dates or '
-    + 'quotes you are not sure of; prefer general statements over false '
-    + 'precision.';
+    + (slides ? `The user asked for ${slides} slides. Deliver as close to that as the content allows.\n` : '')
+    + (audience ? `Audience: ${audience}. Pitch vocabulary, depth and examples to them.\n` : '')
+    + 'Every string must be plain text.';
 };
 
 /**
- * Ask the configured provider for an outline.
+ * Ask the CONFIGURED provider for an outline. Provider truth: router reads
+ * the UI selection; `ai`/`engine` is only consulted for its resolved pair.
  *
  * @param {object} opts
  * @param {string} opts.kind  'pptx' | 'xlsx' | 'docx'
  * @param {string} opts.topic
- * @param {object} opts.ai    the AIEngine, for its resolved provider
+ * @param {object} [opts.ai]      the AIEngine (legacy name, still honored)
+ * @param {object} [opts.engine]  same thing, explicit name
+ * @param {number} [opts.slides]  requested slide count
+ * @param {string} [opts.audience]
+ * @param {Function} [opts.research] async (topic) => digest string | null
+ * @param {Function} [opts.streamFn] test seam (router)
  * @param {number} [opts.timeoutMs]
- * @returns {Promise<{ok:boolean, spec?:object, source:string, message?:string, raw?:string}>}
+ * @returns {Promise<{ok:boolean, spec?:object, source:string, message?:string,
+ *          raw?:string, deckReport?:object, researched?:boolean}>}
  */
-export async function outline({ kind, topic, ai, timeoutMs = 90000 }) {
+export async function outline({ kind, topic, ai = null, engine = null, slides = 0,
+                                audience = '', research = null, streamFn = null,
+                                timeoutMs = 90000 }) {
   if (!DOC_KINDS[kind]) return { ok: false, source: 'none', message: `Unknown type '${kind}'.` };
-  const usr = `Topic: ${topic}\n\nProduce the JSON now.`;
-  const messages = [{ role: 'system', content: SYS(kind) }, { role: 'user', content: usr }];
+  const eng = engine || ai;
 
-  const providerId = ai?.resolvedProvider?.id || 'local';
-  let raw = '';
+  // Optional research digest — only when the topic actually needs it (§15).
+  let digest = '';
+  let researched = false;
+  if (research && needsResearch(topic)) {
+    try {
+      const d = await research(topic);
+      if (d && typeof d === 'string' && d.trim()) {
+        digest = d.trim().slice(0, 2200);
+        researched = true;
+      }
+    } catch { /* research is a bonus, never a blocker */ }
+  }
 
-  if (providerId === 'local' || !providerId) {
+  const sel = router.resolveChat(eng);
+  // 'ollama' with nothing installed → the router still resolves it; the
+  // attempt will fail and fall back honestly below.
+  if (sel.provider === 'local') {
     return { ok: true, spec: outlineFallback(kind, topic), source: 'offline-template' };
   }
 
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    if (providerId === 'ollama') {
-      const model = ai?.resolvedProvider?.model
-        || ai?.pickOllamaModel?.(topic)?.name
-        || ollama.installed?.[0];
-      if (!model) throw new Error('No Ollama model installed.');
-      for await (const d of ollama.stream({
-        messages, model, temperature: 0.4, signal: ctl.signal,
-      })) raw += d;
-    } else {
-      const p = PROVIDERS[providerId];
-      if (!p) throw new Error(`Unknown provider '${providerId}'.`);
-      for await (const d of p.stream({
-        messages,
-        model: ai?.resolvedProvider?.model || p.defaultModel,
-        key: config.getKey(providerId),
-        temperature: 0.4, maxTokens: 2048, signal: ctl.signal,
-      })) raw += d;
-    }
-  } catch (e) {
-    clearTimeout(timer);
-    // A failed model is not a failed feature: fall back and say so.
+  const usrParts = [
+    `Topic: ${topic}`,
+    audience ? `Audience: ${audience}` : '',
+    slides ? `Requested slide count: ${slides}` : '',
+    digest ? `\nResearch digest (ground the content in this; cite sources on the references slide):\n${digest}` : '',
+    '\nProduce the JSON now.',
+  ].filter(Boolean);
+  const messages = [
+    { role: 'system', content: SYS(kind, { slides, audience }) },
+    { role: 'user', content: usrParts.join('\n') },
+  ];
+
+  const r = await router.completeJSON({
+    messages, engine: eng, streamFn, temperature: 0.45,
+    maxTokens: kind === 'pptx' ? 4096 : 2048, timeoutMs, retries: 1,
+  });
+
+  if (!r.ok || !r.json) {
     return {
       ok: true, spec: outlineFallback(kind, topic), source: 'offline-template',
-      message: `${providerId} failed (${e?.message || e}) — built a skeleton instead.`,
+      raw: (r.raw || '').slice(0, 400),
+      message: (r.message || 'The model did not return a usable outline')
+        + ' — built a skeleton instead.',
     };
   }
-  clearTimeout(timer);
 
-  const parsed = extractJson(raw);
-  const spec = validateSpec(kind, parsed, topic);
+  let spec = validateSpec(kind, r.json, topic);
   if (!spec) {
     return {
       ok: true, spec: outlineFallback(kind, topic), source: 'offline-template',
-      raw: raw.slice(0, 400),
-      message: 'The model did not return a usable outline, so AURA built a '
-             + 'skeleton you can edit.',
+      raw: (r.raw || '').slice(0, 400),
+      message: 'The model outline was unusable, so AURA built a skeleton you can edit.',
     };
   }
-  return { ok: true, spec, source: providerId };
+
+  // ── deck validation + repair (§16): never ship empty slides silently ──
+  let deckReport = null;
+  if (kind === 'pptx') {
+    deckReport = validateDeck(spec, { requested: slides });
+    if (!deckReport.ok && deckReport.weak.length) {
+      const repaired = await repairDeck(spec, deckReport, { topic, audience, eng, streamFn, timeoutMs });
+      if (repaired) {
+        spec = validateSpec(kind, repaired, topic) || spec;
+        deckReport = validateDeck(spec, { requested: slides });
+        deckReport.repaired = true;
+      }
+    }
+  }
+
+  return { ok: true, spec, source: `${r.via === 'selected' ? '' : 'fallback:'}${r.provider}`,
+           model: r.model, deckReport, researched };
+}
+
+/** Regex-free proxy for "does this slide carry real content". */
+function contentUnits(s) {
+  let n = 0;
+  n += (s.bullets || []).filter(b => b && b.trim().length > 2).length;
+  n += (s.steps || []).filter(Boolean).length;
+  n += (s.timeline || []).filter(t => t && (t.label || t.text)).length;
+  n += (s.stats || []).filter(t => t && (t.value || t.label)).length;
+  n += (s.table?.rows || []).filter(r => Array.isArray(r) && r.some(c => String(c).trim())).length;
+  n += (s.quote && s.quote.trim().length > 4) ? 1 : 0;
+  if (s.columns) {
+    n += (s.columns.left?.bullets || []).filter(Boolean).length;
+    n += (s.columns.right?.bullets || []).filter(Boolean).length;
+  }
+  return n;
+}
+
+/**
+ * Score a finished deck spec against the professional requirements (§11/§16).
+ * @returns {{ok:boolean, issues:Array<{slide:number|string, problem:string}>,
+ *          weak:number[], slideCount:number, requested:number}}
+ */
+export function validateDeck(spec, { requested = 0 } = {}) {
+  const issues = [];
+  const weak = [];
+  const slides = spec?.slides || [];
+  const CONTENT_KINDS = new Set(['bullets', 'two-column', 'process', 'timeline', 'stats', 'comparison', 'quote', 'conclusion', 'references']);
+
+  if (!slides.length) issues.push({ slide: 'all', problem: 'no slides at all' });
+  slides.forEach((s, i) => {
+    const units = contentUnits(s);
+    if (!s.title?.trim()) issues.push({ slide: i + 1, problem: 'missing title' });
+    if (CONTENT_KINDS.has(s.kind || 'bullets') && units === 0) {
+      issues.push({ slide: i + 1, problem: `empty content (${s.kind || 'bullets'})` });
+      weak.push(i);
+    } else if ((s.kind === 'bullets' || s.kind === 'conclusion') && units < 2) {
+      issues.push({ slide: i + 1, problem: 'thin content (<2 points)' });
+      weak.push(i);
+    }
+    if ((s.bullets || []).some(b => b.split(/\s+/).length > 30)) {
+      issues.push({ slide: i + 1, problem: 'wall-of-text bullet (>30 words)' });
+    }
+  });
+  const kinds = new Set(slides.map(s => s.kind || 'bullets'));
+  if (slides.length >= 6 && kinds.size < 3) {
+    issues.push({ slide: 'all', problem: 'monotonous layouts — every slide is the same kind' });
+  }
+  const last = slides[slides.length - 1], secondLast = slides[slides.length - 2];
+  if (slides.length >= 5 && ![last?.kind, secondLast?.kind].includes('conclusion')) {
+    issues.push({ slide: slides.length, problem: 'no conclusion slide' });
+  }
+  if (requested > 0 && Math.abs(slides.length - requested) > Math.max(1, Math.round(requested * 0.3))) {
+    issues.push({ slide: 'all', problem: `slide count ${slides.length} vs requested ${requested}` });
+  }
+  const hardFail = weak.length > 0;
+  return { ok: !hardFail, issues, weak, slideCount: slides.length, requested };
+}
+
+/**
+ * Regenerate the weak slides via the configured model and splice them back.
+ * One round — good enough in practice, bounded in cost.
+ */
+export async function repairDeck(spec, report, { topic, audience = '', eng = null, streamFn = null, timeoutMs = 60000 } = {}) {
+  const bad = report.weak.map(i => `Slide ${i + 1} ("${spec.slides[i]?.title}")`).join(', ');
+  const sys = 'You are fixing specific slides in a presentation. Reply with ONE JSON object: '
+    + '{"slides":[{"index":<number>,"title":"…","kind":"…","bullets":["…"],"notes":"…"}]} '
+    + 'where index is 1-based. Fill each with real, specific content (3–5 bullets, 8–18 words '
+    + 'each, plus speaker notes). Match this deck spec: ' + DOC_KINDS.pptx.schema.slice(0, 400);
+  const usr = `Topic: ${topic}${audience ? `\nAudience: ${audience}` : ''}\n`
+    + `Weak slides: ${bad}\n`
+    + `Deck outline for context: ${JSON.stringify(spec.slides.map(s => s.title)).slice(0, 500)}\n`
+    + 'Produce the replacement slides JSON now.';
+  const r = await router.completeJSON({
+    messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }],
+    engine: eng, streamFn, temperature: 0.45, maxTokens: 2048, timeoutMs, retries: 0,
+  });
+  if (!r.ok || !r.json || !Array.isArray(r.json.slides)) return null;
+  try {
+    const next = JSON.parse(JSON.stringify(spec));
+    for (const fix of r.json.slides) {
+      const i = Number(fix.index) - 1;
+      if (!Number.isInteger(i) || i < 0 || i >= next.slides.length) continue;
+      next.slides[i] = { ...next.slides[i], ...fix };
+      delete next.slides[i].index;
+    }
+    return next;
+  } catch { return null; }
 }
 
 /**
@@ -175,7 +343,8 @@ export async function outline({ kind, topic, ai, timeoutMs = 90000 }) {
  *
  * Written defensively on purpose: models return `slides` as an object, bullets
  * as a single string, numbers as strings. Repairing those is cheap; failing on
- * them makes the feature feel broken.
+ * them makes the feature feel broken. Unknown slide fields are PRESERVED —
+ * layouts, steps, stats… — the renderer decides what to do with them.
  */
 export function validateSpec(kind, obj, topic = '') {
   if (!obj || typeof obj !== 'object') return null;
@@ -185,15 +354,48 @@ export function validateSpec(kind, obj, topic = '') {
 
   if (kind === 'pptx') {
     const src = arr(obj.slides).filter(s => s && typeof s === 'object');
-    const slides = src.map((s, i) => ({
-      title: str(s.title || s.heading || s.name, 160) || `Slide ${i + 1}`,
-      bullets: arr(s.bullets ?? s.points ?? s.content)
+    const KINDS = new Set(['title', 'section', 'bullets', 'two-column', 'process', 'timeline',
+                           'stats', 'comparison', 'quote', 'conclusion', 'references', 'image']);
+    const slides = src.map((s, i) => {
+      const out = { ...s };   // preserve rich layout fields verbatim
+      out.kind = KINDS.has(String(s.kind || '').toLowerCase())
+        ? String(s.kind).toLowerCase()
+        : (i === 0 ? 'title' : 'bullets');
+      out.title = str(s.title || s.heading || s.name, 160) || `Slide ${i + 1}`;
+      out.purpose = str(s.purpose, 200);
+      out.bullets = arr(s.bullets ?? s.points ?? (Array.isArray(s.content) ? s.content : null))
         .map(b => str(typeof b === 'object' ? (b.text ?? b.title ?? '') : b, 400))
-        .filter(Boolean).slice(0, 12),
-      notes: str(s.notes, 2000),
-    })).filter(s => s.title || s.bullets.length);
+        .filter(Boolean).slice(0, 12);
+      if (s.columns && typeof s.columns === 'object') {
+        out.columns = {
+          left: { title: str(s.columns.left?.title, 80),
+                  bullets: arr(s.columns.left?.bullets).map(b => str(b, 300)).filter(Boolean).slice(0, 8) },
+          right: { title: str(s.columns.right?.title, 80),
+                   bullets: arr(s.columns.right?.bullets).map(b => str(b, 300)).filter(Boolean).slice(0, 8) },
+        };
+      }
+      if (s.steps) out.steps = arr(s.steps).map(x => str(x, 300)).filter(Boolean).slice(0, 8);
+      if (s.timeline) out.timeline = arr(s.timeline)
+        .map(t => ({ label: str(t?.label, 60), text: str(t?.text ?? t, 300) }))
+        .filter(t => t.label || t.text).slice(0, 8);
+      if (s.stats) out.stats = arr(s.stats)
+        .map(t => ({ value: str(t?.value, 40), label: str(t?.label ?? t, 160) }))
+        .filter(t => t.value || t.label).slice(0, 5);
+      if (s.table && typeof s.table === 'object') {
+        out.table = {
+          columns: arr(s.table.columns).map(c => str(c, 80)).slice(0, 8),
+          rows: arr(s.table.rows).map(rw => arr(rw).map(c => coerceCell(c)).slice(0, 8))
+            .filter(rw => rw.length).slice(0, 12),
+        };
+      }
+      if (s.quote) { out.quote = str(s.quote, 500); out.attribution = str(s.attribution, 120); }
+      out.visual = str(s.visual, 300);
+      out.notes = str(s.notes, 2000);
+      return out;
+    }).filter(s => s.title || contentUnits(s) > 0);
     if (!slides.length) return null;
-    return { title, subtitle: str(obj.subtitle, 200), slides };
+    return { title, subtitle: str(obj.subtitle, 200),
+             theme: str(obj.theme, 60) || '', slides };
   }
 
   if (kind === 'xlsx') {
@@ -209,7 +411,7 @@ export function validateSpec(kind, obj, topic = '') {
         if (Array.isArray(r)) return r.slice(0, 60).map(coerceCell);
         if (r && typeof r === 'object') {
           const cols = arr(sh.columns ?? sh.headers).map(c => str(c, 200));
-          return cols.length ? cols.map(c => coerceCell(r[c])) 
+          return cols.length ? cols.map(c => coerceCell(r[c]))
                              : Object.values(r).slice(0, 60).map(coerceCell);
         }
         return [coerceCell(r)];
@@ -262,12 +464,19 @@ export function outlineFallback(kind, topic) {
     return {
       title: t, subtitle: note,
       slides: [
-        { title: 'Overview', bullets: [`What ${t} is`, 'Why it matters', 'Who it affects'] },
-        { title: 'Background', bullets: ['Context', 'How we got here'] },
-        { title: 'Key points', bullets: ['Point one', 'Point two', 'Point three'] },
-        { title: 'Detail', bullets: ['Evidence', 'Examples'] },
-        { title: 'Challenges', bullets: ['Open problems', 'Trade-offs'] },
-        { title: 'Summary', bullets: ['What to remember', 'Next steps'] },
+        { kind: 'title', title: t, purpose: 'Cover', bullets: [] },
+        { kind: 'bullets', title: 'Overview', purpose: 'Frame the topic',
+          bullets: [`What ${t} is`, 'Why it matters', 'Who it affects'] },
+        { kind: 'bullets', title: 'Background', purpose: 'Give context',
+          bullets: ['Context', 'How we got here'] },
+        { kind: 'bullets', title: 'Key points', purpose: 'Core content',
+          bullets: ['Point one', 'Point two', 'Point three'] },
+        { kind: 'bullets', title: 'Detail', purpose: 'Depth',
+          bullets: ['Evidence', 'Examples'] },
+        { kind: 'bullets', title: 'Challenges', purpose: 'Balance',
+          bullets: ['Open problems', 'Trade-offs'] },
+        { kind: 'conclusion', title: 'Summary', purpose: 'Close',
+          bullets: ['What to remember', 'Next steps'] },
       ],
     };
   }
@@ -310,4 +519,5 @@ export function describeSpec(kind, spec) {
   return `${s.length} sections — ${s.map(x => x.heading).filter(Boolean).slice(0, 4).join(', ')}`;
 }
 
-export default { detectDocRequest, outline, validateSpec, outlineFallback, describeSpec, DOC_KINDS };
+export default { detectDocRequest, outline, validateSpec, validateDeck, repairDeck,
+                 outlineFallback, describeSpec, needsResearch, DOC_KINDS };

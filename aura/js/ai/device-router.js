@@ -12,18 +12,28 @@
  * Must capture the device identifier.
  */
 const DEVICE_PATTERNS = [
-  // "on my phone" / "on the phone" / "on my android"
-  { rx: /\b(on|at|to|send to|route to)\s+(my\s+)?(?:the\s+)?(phone|mobile|android|iphone|ipad|ios|cell)/i,
-    device: (m) => m[4]?.toLowerCase().match(/iphone|ipad|ios/) ? 'phone' : 'phone' },
-  // "on my laptop" / "on my pc" / "on this computer"
-  { rx: /\b(on|at|to|send to|route to)\s+(my\s+)?(?:this\s+)?(laptop|pc|computer|windows machine|desktop)/i,
-    device: () => 'windows-host' },
+  // Named device: "on Aryan's phone" / "on mom's tablet" — the NAME matters
+  // because several devices can be paired. Keep the name as the reference.
+  { rx: /\b(?:on|to|onto)\s+([a-z][a-z0-9]{1,20}?)['’]s\s+(phone|mobile|android|iphone|tablet|tablet|ipad|laptop|computer|pc)\b/i,
+    device: (m) => `${m[1].toLowerCase()}-${m[2].toLowerCase()}`,
+    label: (m) => `${m[1]}'s ${m[2]}` },
+  // "on my phone" / "in my mobile" / "phone pe" / "to the tablet"
+  { rx: /\b(?:on|in|at|to|into|onto|send to|route to|put on|cast to)\s+(?:my\s+|the\s+|mera\s+|mere\s+)(phone|mobile|android|iphone|ipad|ios|tablet|cell|fone)\b/i,
+    device: () => 'phone', label: () => 'phone' },
+  { rx: /\b(phone|mobile|tablet)\s+(pe|par|me|mein)\b/i,
+    device: () => 'phone', label: () => 'phone' },
+  // "on my laptop" / "on this computer" / "another desktop" / "your desktop"
+  { rx: /\b(?:on|at|to|send to|route to)\s+(?:my\s+|the\s+|this\s+)?(laptop|pc|computer|windows machine|desktop)\b/i,
+    device: () => 'windows-host', label: () => 'this computer' },
+  { rx: /\b(?:on|in|to)\s+(?:your|another|the other|a second)\s+(desktop|computer|pc|aura device|machine)\b/i,
+    device: (m) => `aura-${m[1].toLowerCase().replace(/\s+/g, '-')}`,
+    label: (m) => `another ${m[1]}` },
   // "on my mac"
-  { rx: /\b(on|at|to|send to|route to)\s+(my\s+)?(mac|macos|osx)/i,
-    device: () => 'macos' },
+  { rx: /\b(?:on|at|to|send to|route to)\s+(?:my\s+)?(mac|macbook|macos|osx)\b/i,
+    device: () => 'macos', label: () => 'mac' },
   // Device ID directly: "on android-001" / "on phone-003"
-  { rx: /\b(on|at|to|send to|route to)\s+([a-z0-9\-]+)\b/i,
-    device: (m) => m[2] },
+  { rx: /\b(?:on|at|to|send to|route to)\s+([a-z0-9\-]+-\d{3,})\b/i,
+    device: (m) => m[1] },
 ];
 
 /**

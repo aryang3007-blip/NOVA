@@ -151,15 +151,444 @@ def _clip(v, n=MAX_TEXT):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  PPTX
+#  PPTX — professional renderer
 # ══════════════════════════════════════════════════════════════════════
+#
+# Every slide kind gets an intentionally-designed layout (spec §11), drawn on
+# blank canvases for full control: hero title, section divider, bullets,
+# two-column, process, timeline, stats, comparison table, quote, conclusion,
+# references. One theme system keeps typography/color coherent, and after
+# saving we RE-OPEN the file and validate it (spec §16) — "written to disk"
+# is not the same as "a good deck".
+
+_SLIDE_W = 13.333
+_SLIDE_H = 7.5
+
+# Theme palettes: (bg, ink, dim, accent, panel). The dark one is AURA's
+# identity (near-black with Command Gold, like the UI theme).
+THEMES = {
+    "professional-dark": {
+        "bg": (0x0B, 0x10, 0x1A), "ink": (0xF2, 0xF5, 0xF9),
+        "dim": (0xA8, 0xB4, 0xC4), "accent": (0xE8, 0xB7, 0x4A),
+        "panel": (0x14, 0x1C, 0x29),
+    },
+    "professional-light": {
+        "bg": (0xFF, 0xFF, 0xFF), "ink": (0x10, 0x18, 0x24),
+        "dim": (0x5A, 0x6B, 0x80), "accent": (0xB8, 0x86, 0x1F),
+        "panel": (0xF2, 0xF4, 0xF7),
+    },
+    "academic": {
+        "bg": (0xFA, 0xF9, 0xF6), "ink": (0x1B, 0x2A, 0x4A),
+        "dim": (0x5C, 0x66, 0x74), "accent": (0x1F, 0x4E, 0x9C),
+        "panel": (0xEE, 0xEC, 0xE4),
+    },
+    "minimal": {
+        "bg": (0xFF, 0xFF, 0xFF), "ink": (0x16, 0x16, 0x16),
+        "dim": (0x77, 0x77, 0x77), "accent": (0x44, 0x44, 0x44),
+        "panel": (0xF4, 0xF4, 0xF4),
+    },
+}
+FONT_HEAD = "Calibri Light"
+FONT_BODY = "Calibri"
+
+
+def _theme(spec):
+    name = str(spec.get("theme") or "").lower()
+    for key in THEMES:
+        if key in name:
+            return THEMES[key], key
+    if "light" in name:
+        return THEMES["professional-light"], "professional-light"
+    return THEMES["professional-dark"], "professional-dark"
+
+
+def _rgb(t):
+    return RGBColor(*t)
+
+
+def _add_rect(slide, x, y, w, h, fill, line=None):
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches
+    sh = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
+    sh.fill.solid()
+    sh.fill.fore_color.rgb = _rgb(fill)
+    if line:
+        sh.line.color.rgb = _rgb(line)
+        sh.line.width = Pt(0.75)
+    else:
+        sh.line.fill.background()
+    sh.shadow.inherit = False
+    return sh
+
+
+def _add_text(slide, x, y, w, h, text, size=18, color=(0, 0, 0), bold=False,
+              align=None, font=FONT_BODY, italic=False, spacing=1.0):
+    from pptx.util import Inches, Pt
+    tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    tf = tb.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    if align:
+        p.alignment = align
+    p.line_spacing = spacing
+    r = p.add_run()
+    r.text = _clip(text, MAX_TEXT)
+    r.font.size = Pt(size)
+    r.font.bold = bold
+    r.font.italic = italic
+    r.font.name = font
+    r.font.color.rgb = _rgb(color)
+    return tb
+
+
+def _add_bullets(slide, x, y, w, h, bullets, size, color, accent, font=FONT_BODY):
+    """Bulleted body with the accent dot typography keeps consistent."""
+    from pptx.util import Inches, Pt
+    tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    tf = tb.text_frame
+    tf.word_wrap = True
+    first = True
+    for b in list(bullets or [])[:9]:
+        text = _clip(b, 400).strip()
+        if not text:
+            continue
+        p = tf.paragraphs[0] if first else tf.add_paragraph()
+        p.line_spacing = 1.08
+        p.space_after = Pt(6)
+        rd = p.add_run()
+        rd.text = "▪  "
+        rd.font.size = Pt(size)
+        rd.font.name = font
+        rd.font.color.rgb = _rgb(accent)
+        rr = p.add_run()
+        rr.text = text
+        rr.font.size = Pt(size)
+        rr.font.name = font
+        rr.font.color.rgb = _rgb(color)
+        first = False
+    return tb
+
+
+def _slide_bg(slide, bg):
+    _add_rect(slide, 0, 0, _SLIDE_W, _SLIDE_H, bg)
+
+
+def _header(slide, title, t, number=None, total=None, deck=""):
+    """Title + accent rule + footer; used by all content-kind layouts."""
+    from pptx.util import Pt
+    from pptx.enum.text import PP_ALIGN
+    _add_text(slide, 0.55, 0.32, 11.5, 0.9, title, size=27, color=t["ink"],
+              bold=True, font=FONT_HEAD)
+    _add_rect(slide, 0.6, 1.12, 1.6, 0.045, t["accent"])
+    if number and total:
+        _add_text(slide, 12.1, 7.02, 1.0, 0.35, f"{number} / {total}", size=10,
+                  color=t["dim"], align=PP_ALIGN.RIGHT)
+    if deck:
+        _add_text(slide, 0.55, 7.02, 6.0, 0.35, _clip(deck, 60), size=10, color=t["dim"])
+
+
+def _notes(slide, raw):
+    notes = raw.get("notes")
+    if notes:
+        try:
+            slide.notes_slide.notes_text_frame.text = _clip(notes, 2000)
+        except Exception:
+            pass
+
+
+def _content_fallback_bullets(raw):
+    """Old/loose specs: mine ANY content field into bullets so no slide is empty."""
+    bullets = list(raw.get("bullets") or [])
+    for st in (raw.get("steps") or []):
+        bullets.append(str(st))
+    for tl in (raw.get("timeline") or []):
+        lab, txt = (tl.get("label") or ""), (tl.get("text") or "")
+        bullets.append(f"{lab} — {txt}".strip(" —"))
+    for st in (raw.get("stats") or []):
+        val, lab = (st.get("value") or ""), (st.get("label") or "")
+        bullets.append(f"{val}: {lab}".strip(": "))
+    col = raw.get("columns") or {}
+    for side in ("left", "right"):
+        c = col.get(side) or {}
+        if c.get("title"):
+            bullets.append(str(c["title"]))
+        bullets.extend(str(b) for b in (c.get("bullets") or []))
+    if raw.get("quote"):
+        bullets.append(str(raw["quote"]))
+    return [_clip(b, 400) for b in bullets if str(b).strip()][:9]
+
+
+def _render_hero(prs, title, subtitle, t, raw=None):
+    from pptx.enum.text import PP_ALIGN
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _add_rect(sl, 0, 2.62, 0.18, 2.2, t["accent"])
+    kicker = (raw or {}).get("purpose") or "A presentation by NOVA"
+    _add_text(sl, 0.9, 2.15, 11.5, 0.5, str(kicker).upper(), size=13,
+              color=t["accent"], bold=True)
+    _add_text(sl, 0.9, 2.62, 11.8, 1.9, title, size=52, color=t["ink"],
+              bold=True, font=FONT_HEAD)
+    if subtitle:
+        _add_text(sl, 0.9, 4.45, 11.2, 0.9, subtitle, size=18, color=t["dim"], spacing=1.1)
+    _add_text(sl, 0.9, 6.6, 8.0, 0.4, datetime.date.today().strftime("%d %B %Y"),
+              size=12, color=t["dim"], align=PP_ALIGN.LEFT)
+    if raw:
+        _notes(sl, raw)
+    return sl
+
+
+def _render_section(prs, raw, idx, total, deck, t):
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["panel"])
+    _add_rect(sl, 0, 0, 0.35, _SLIDE_H, t["accent"])
+    _add_text(sl, 1.1, 2.4, 2.5, 1.6, f"{idx:02d}", size=80, color=t["accent"],
+              bold=True, font=FONT_HEAD)
+    _add_text(sl, 3.3, 2.68, 9.3, 1.4, raw.get("title") or f"Section {idx}",
+              size=40, color=t["ink"], bold=True, font=FONT_HEAD)
+    if raw.get("purpose"):
+        _add_text(sl, 3.35, 4.0, 8.8, 0.8, raw["purpose"], size=16, color=t["dim"], spacing=1.1)
+    bl = raw.get("bullets") or []
+    if bl:
+        _add_bullets(sl, 3.35, 4.75, 8.8, 2.0, bl[:4], 15, t["ink"], t["accent"])
+    _notes(sl, raw)
+    return sl
+
+
+def _render_bullets(prs, raw, idx, total, deck, t):
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _header(sl, raw.get("title") or f"Slide {idx}", t, idx, total, deck)
+    bullets = _content_fallback_bullets(raw)
+    _add_bullets(sl, 0.75, 1.55, 11.9, 5.2, bullets, 18, t["ink"], t["accent"])
+    _notes(sl, raw)
+    return sl
+
+
+def _render_two_column(prs, raw, idx, total, deck, t):
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _header(sl, raw.get("title") or f"Slide {idx}", t, idx, total, deck)
+    col = raw.get("columns") or {}
+    left, right = col.get("left") or {}, col.get("right") or {}
+    lb = list(left.get("bullets") or []) or [b for b in (raw.get("bullets") or [])][:4]
+    rb = list(right.get("bullets") or []) or [b for b in (raw.get("bullets") or [])][4:8]
+    # Left card
+    _add_rect(sl, 0.6, 1.5, 5.95, 5.1, t["panel"])
+    _add_text(sl, 0.9, 1.7, 5.4, 0.5, left.get("title") or "", size=16,
+              color=t["accent"], bold=True)
+    _add_bullets(sl, 0.9, 2.3, 5.35, 4.1, lb[:6], 15, t["ink"], t["accent"])
+    # Right card
+    _add_rect(sl, 6.85, 1.5, 5.95, 5.1, t["panel"])
+    _add_text(sl, 7.15, 1.7, 5.4, 0.5, right.get("title") or "", size=16,
+              color=t["accent"], bold=True)
+    _add_bullets(sl, 7.15, 2.3, 5.35, 4.1, rb[:6], 15, t["ink"], t["accent"])
+    _notes(sl, raw)
+    return sl
+
+
+def _render_process(prs, raw, idx, total, deck, t):
+    from pptx.enum.text import PP_ALIGN
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _header(sl, raw.get("title") or f"Slide {idx}", t, idx, total, deck)
+    steps = [str(s) for s in (raw.get("steps") or raw.get("bullets") or []) if str(s).strip()][:6]
+    n = max(1, len(steps))
+    gap, w = 0.25, min(2.2, (12.2 - 0.25 * (n - 1)) / n)
+    x = 0.6
+    for i, s in enumerate(steps):
+        _add_rect(sl, x, 2.0, w, 0.75, t["accent"])
+        _add_text(sl, x, 2.08, w, 0.55, f"Step {i + 1}", size=14, color=t["bg"],
+                  bold=True, align=PP_ALIGN.CENTER)
+        _add_rect(sl, x, 2.75, w, 2.9, t["panel"])
+        _add_text(sl, x + 0.12, 2.95, w - 0.24, 2.5, _clip(s, 220), size=13,
+                  color=t["ink"], align=PP_ALIGN.LEFT, spacing=1.05)
+        x += w + gap
+    _notes(sl, raw)
+    return sl
+
+
+def _render_timeline(prs, raw, idx, total, deck, t):
+    from pptx.enum.text import PP_ALIGN
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _header(sl, raw.get("title") or f"Slide {idx}", t, idx, total, deck)
+    items = [x for x in (raw.get("timeline") or []) if (x.get("label") or x.get("text"))][:6]
+    if items:
+        y_line = 3.55
+        _add_rect(sl, 0.8, y_line, 11.7, 0.05, t["accent"])
+        n = len(items)
+        step = 11.7 / max(1, n)
+        for i, it in enumerate(items):
+            cx = 0.8 + step * i + step / 2
+            _add_rect(sl, cx - 0.07, y_line - 0.055, 0.16, 0.16, t["accent"])
+            above = (i % 2 == 0)
+            _add_text(sl, cx - step / 2 + 0.1, (y_line - 1.2) if above else (y_line + 0.35),
+                      step - 0.2, 0.5, _clip(it.get("label") or "", 60), size=14,
+                      color=t["accent"], bold=True, align=PP_ALIGN.CENTER)
+            _add_text(sl, cx - step / 2 + 0.1, (y_line - 0.72) if above else (y_line + 0.85),
+                      step - 0.2, 1.5, _clip(it.get("text") or "", 200), size=11.5,
+                      color=t["ink"], align=PP_ALIGN.CENTER, spacing=1.02)
+    _notes(sl, raw)
+    return sl
+
+
+def _render_stats(prs, raw, idx, total, deck, t):
+    from pptx.enum.text import PP_ALIGN
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _header(sl, raw.get("title") or f"Slide {idx}", t, idx, total, deck)
+    stats = [s for s in (raw.get("stats") or []) if (s.get("value") or s.get("label"))][:4]
+    n = max(1, len(stats))
+    w = min(2.9, (12.2 - 0.3 * (n - 1)) / n)
+    x = 0.6
+    for s in stats:
+        _add_rect(sl, x, 1.9, w, 3.3, t["panel"])
+        _add_rect(sl, x, 1.9, w, 0.07, t["accent"])
+        _add_text(sl, x + 0.1, 2.25, w - 0.2, 1.2, _clip(s.get("value") or "", 24),
+                  size=40, color=t["accent"], bold=True, font=FONT_HEAD, align=PP_ALIGN.CENTER)
+        _add_text(sl, x + 0.18, 3.55, w - 0.36, 1.5, _clip(s.get("label") or "", 200),
+                  size=13, color=t["ink"], align=PP_ALIGN.CENTER, spacing=1.05)
+        x += w + 0.3
+    if raw.get("bullets"):
+        _add_bullets(sl, 0.75, 5.45, 11.9, 1.3, raw["bullets"][:3], 14, t["ink"], t["accent"])
+    _notes(sl, raw)
+    return sl
+
+
+def _render_comparison(prs, raw, idx, total, deck, t):
+    table = raw.get("table") or {}
+    cols = [str(c) for c in (table.get("columns") or [])][:8]
+    rows = table.get("rows") or []
+    if not cols or not rows:
+        return _render_two_column(prs, raw, idx, total, deck, t)
+    from pptx.util import Inches, Pt
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _header(sl, raw.get("title") or f"Slide {idx}", t, idx, total, deck)
+    rr = min(len(rows), 8)
+    shp = sl.shapes.add_table(rr + 1, len(cols), Inches(0.6), Inches(1.55),
+                              Inches(12.1), Inches(min(4.9, 0.55 * (rr + 1))))
+    tbl = shp.table
+    for j, c in enumerate(cols):
+        cell = tbl.cell(0, j)
+        cell.text = _clip(c, 80)
+        for p in cell.text_frame.paragraphs:
+            for r in p.runs:
+                r.font.size = Pt(14); r.font.bold = True
+                r.font.color.rgb = _rgb(t["bg"] if t["bg"] != (0xFF, 0xFF, 0xFF) else t["ink"])
+    for i in range(rr):
+        for j in range(len(cols)):
+            cell = tbl.cell(i + 1, j)
+            val = rows[i][j] if j < len(rows[i]) else ""
+            cell.text = _clip(val, 200)
+            for p in cell.text_frame.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(12.5)
+                    r.font.color.rgb = _rgb(t["ink"])
+    _notes(sl, raw)
+    return sl
+
+
+def _render_quote(prs, raw, idx, total, deck, t):
+    from pptx.enum.text import PP_ALIGN
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _add_rect(sl, 0.9, 2.6, 0.16, 2.4, t["accent"])
+    quote = raw.get("quote") or " ".join(_content_fallback_bullets(raw)[:2])
+    _add_text(sl, 1.35, 2.5, 10.6, 2.6, f"“{_clip(quote, 400)}”", size=28,
+              color=t["ink"], italic=True, font=FONT_HEAD, align=PP_ALIGN.LEFT, spacing=1.15)
+    if raw.get("attribution"):
+        _add_text(sl, 1.4, 5.2, 9.0, 0.5, "— " + _clip(raw["attribution"], 120),
+                  size=15, color=t["dim"])
+    if raw.get("title") and raw["title"] != "Quote":
+        _add_text(sl, 0.9, 1.5, 11.5, 0.6, raw["title"], size=15, color=t["accent"], bold=True)
+    _notes(sl, raw)
+    return sl
+
+
+def _render_conclusion(prs, raw, idx, total, deck, t):
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _add_rect(sl, 0, 0, _SLIDE_W, 0.16, t["accent"])
+    _header(sl, raw.get("title") or "Conclusion", t, idx, total, deck)
+    bullets = _content_fallback_bullets(raw)
+    _add_bullets(sl, 0.9, 1.75, 11.5, 4.6, bullets, 19, t["ink"], t["accent"])
+    _notes(sl, raw)
+    return sl
+
+
+def _render_references(prs, raw, idx, total, deck, t):
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _header(sl, raw.get("title") or "References", t, idx, total, deck)
+    refs = _content_fallback_bullets(raw)
+    _add_bullets(sl, 0.75, 1.6, 11.9, 5.0, refs, 13.5, t["dim"], t["accent"])
+    _notes(sl, raw)
+    return sl
+
+
+_KIND_RENDERERS = {
+    "section": _render_section,
+    "bullets": _render_bullets,
+    "two-column": _render_two_column,
+    "process": _render_process,
+    "timeline": _render_timeline,
+    "stats": _render_stats,
+    "comparison": _render_comparison,
+    "quote": _render_quote,
+    "conclusion": _render_conclusion,
+    "references": _render_references,
+}
+
+
+def validate_pptx(path, expected_slides=None):
+    """
+    Post-write artifact validation (spec §16): re-open the FILE and check the
+    things a user would notice — slide count, missing titles, slides whose
+    body is empty, giant over-stuffed bodies. Returns a report, never throws.
+    """
+    report = {"ok": False, "fileExists": os.path.isfile(path), "slideCount": 0,
+              "issues": []}
+    if not report["fileExists"]:
+        report["issues"].append("file not found after save")
+        return report
+    try:
+        prs = Presentation(path)
+    except Exception as e:
+        report["issues"].append(f"file cannot be re-opened: {e}")
+        return report
+    slides = list(prs.slides)
+    report["slideCount"] = len(slides)
+    if expected_slides is not None and len(slides) != expected_slides:
+        report["issues"].append(f"slide count {len(slides)} != expected {expected_slides}")
+    if not slides:
+        report["issues"].append("file opens but has no slides")
+        return report
+    for i, s in enumerate(slides):
+        texts = [sh.text_frame.text.strip() for sh in s.shapes
+                 if getattr(sh, "has_text_frame", False)]
+        joined = " ".join(x for x in texts if x).strip()
+        if not joined:
+            report["issues"].append(f"slide {i + 1} has no text at all")
+        elif i > 0 and len(joined) < 8:
+            report["issues"].append(f"slide {i + 1} is nearly empty ({len(joined)} chars)")
+        if sum(len(x) for x in texts) > 2600:
+            report["issues"].append(f"slide {i + 1} likely overflows ({sum(len(x) for x in texts)} chars)")
+    report["ok"] = not report["issues"]
+    return report
+
 
 def build_pptx(spec, folder=None, resolver=None):
     """
     spec = {
-      "title": str, "subtitle": str,
-      "slides": [ {"title": str, "bullets": [str], "notes": str}, ... ]
+      "title": str, "subtitle": str, "theme": str (optional),
+      "slides": [ {"kind": title|section|bullets|two-column|process|timeline|
+                          stats|comparison|quote|conclusion|references,
+                   "title": str, "purpose": str, "bullets": [str], "columns": …,
+                   "steps": …, "timeline": …, "stats": …, "table": …,
+                   "quote": str, "notes": str}, ... ]
     }
+    Old specs (no kinds) render exactly as before: hero + bullet slides.
     """
     if not HAS_PPTX:
         return {"ok": False, "missing": "python-pptx",
@@ -174,77 +603,80 @@ def build_pptx(spec, folder=None, resolver=None):
     if len(slides) > MAX_SLIDES:
         return {"ok": False,
                 "message": f"Refused: {len(slides)} slides exceeds the {MAX_SLIDES} cap."}
+    # Drop slides that carry nothing at all (no title AND no content).
+    usable = [s for s in slides
+              if isinstance(s, dict) and (str(s.get("title") or "").strip()
+                                          or _content_fallback_bullets(s)
+                                          or (s.get("table") or {}).get("rows"))]
+    if not usable:
+        return {"ok": False, "message": "The outline has no usable slides."}
 
     title = _clip(spec.get("title") or "Untitled", 160)
     path, err = _target_path(folder, spec.get("filename") or title, ".pptx", resolver)
     if err:
         return {"ok": False, "message": err}
 
+    t, theme_name = _theme(spec)
     prs = Presentation()
-    prs.slide_width = Inches(13.333)          # 16:9
-    prs.slide_height = Inches(7.5)
+    prs.slide_width = Inches(_SLIDE_W)
+    prs.slide_height = Inches(_SLIDE_H)
 
-    # ── title slide
-    s = prs.slides.add_slide(prs.slide_layouts[0])
-    s.shapes.title.text = title
-    if len(s.placeholders) > 1:
-        sub = _clip(spec.get("subtitle") or
-                    datetime.date.today().strftime("%d %B %Y"), 200)
-        s.placeholders[1].text = sub
-    try:
-        s.shapes.title.text_frame.paragraphs[0].runs[0].font.color.rgb = RGBColor(*ACCENT)
-    except Exception:
-        pass
-
-    # ── content slides
+    first_is_title = str(usable[0].get("kind") or "").lower() == "title"
+    deck_title = title
     made = 0
-    for raw in slides:
-        if not isinstance(raw, dict):
-            continue
-        layout = prs.slide_layouts[1]          # Title and Content
-        sl = prs.slides.add_slide(layout)
-        sl.shapes.title.text = _clip(raw.get("title") or f"Slide {made + 2}", 160)
 
-        bullets = raw.get("bullets") or []
-        if isinstance(bullets, str):
-            bullets = [bullets]
-        body = None
-        for ph in sl.placeholders:
-            if ph.placeholder_format.idx != 0:
-                body = ph
-                break
-        if body is not None:
-            tf = body.text_frame
-            tf.clear()
-            first = True
-            for b in list(bullets)[:12]:
-                text = _clip(b, 400)
-                if not text.strip():
-                    continue
-                p = tf.paragraphs[0] if first else tf.add_paragraph()
-                p.text = text
-                p.level = 0
-                p.font.size = Pt(18)
-                first = False
-            if first:                          # no usable bullets
-                tf.paragraphs[0].text = ""
+    # Hero: from the spec's title slide, or synthesised from spec.title so
+    # legacy outlines (title + N bullet slides) keep their old N+1 shape.
+    if first_is_title:
+        raw0 = usable[0]
+        _render_hero(prs, _clip(raw0.get("title") or title, 160),
+                     _clip(raw0.get("subtitle") or spec.get("subtitle") or "", 200),
+                     t, raw0)
+        content = usable[1:]
+        made = 1
+    else:
+        _render_hero(prs, title,
+                     _clip(spec.get("subtitle") or datetime.date.today().strftime("%d %B %Y"), 200),
+                     t, None)
+        content = usable
+        made = 1
 
-        notes = raw.get("notes")
-        if notes:
-            try:
-                sl.notes_slide.notes_text_frame.text = _clip(notes, 2000)
-            except Exception:
-                pass
-        made += 1
+    total = made + len(content)
+    rendered = 0
+    for offset, raw in enumerate(content):
+        idx = made + offset + 1
+        kind = str(raw.get("kind") or "").lower().strip()
+        renderer = _KIND_RENDERERS.get(kind, _render_bullets)
+        try:
+            renderer(prs, raw, idx, total, deck_title, t)
+        except Exception:
+            # A fancy layout failing must never kill the deck: render plain.
+            fb = prs.slides.add_slide(prs.slide_layouts[6])
+            _slide_bg(fb, t["bg"])
+            _header(fb, raw.get("title") or f"Slide {idx}", t, idx, total, deck_title)
+            _add_bullets(fb, 0.75, 1.55, 11.9, 5.2, _content_fallback_bullets(raw),
+                         18, t["ink"], t["accent"])
+            _notes(fb, raw)
+        rendered += 1
 
     try:
         prs.save(path)
     except Exception as e:
         return {"ok": False, "message": f"Could not save: {e}"}
 
+    # Artifact verification — report honestly instead of blind success (§16).
+    validation = validate_pptx(path, expected_slides=made + rendered)
+    total_slides = made + rendered
+    msg = f"Created a {total_slides}-slide presentation ({theme_name}) at {path}"
+    if validation["ok"]:
+        msg += " — validated: every slide has content."
+    else:
+        msg += f" — validation warnings: {'; '.join(validation['issues'][:3])}"
+
     return {"ok": True, "path": path, "kind": "pptx",
-            "slides": made + 1, "bytes": os.path.getsize(path),
-            "message": f"Created a {made + 1}-slide presentation at {path}"}
+            "slides": total_slides, "bytes": os.path.getsize(path),
+            "theme": theme_name, "validation": validation,
+            "message": msg}
 
 
 # ══════════════════════════════════════════════════════════════════════
