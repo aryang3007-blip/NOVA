@@ -167,6 +167,93 @@ export class ScreenAgent {
              reason: `smallest vision model (${sized[0].p}B)` };
   }
 
+  /* ── vision backend: cloud key first, local Ollama as the offline default ── */
+
+  /**
+   * Which provider should LOOK AT an image right now?
+   *
+   * This is the fix for "screenshots never reach the API model": ASK / FIND /
+   * ACT used to hardcode a local Ollama vision model, so a machine with only
+   * an API key configured (Gemini, OpenAI…) hit "No image-capable model
+   * installed" and the frame went nowhere. Now a keyed cloud provider wins;
+   * a local model is the offline fallback — behaviour on a machine with no
+   * keys configured is unchanged.
+   *
+   * Order: pinned visionProvider → current cloud chat provider → any keyed
+   * cloud provider in quality order → null (use local).
+   *
+   * @returns {{p:object, id:string, model:string, key:string|undefined}|null}
+   */
+  pickVisionBackend() {
+    const cfg = this.config || config;
+    const vPref = cfg?.get?.('visionProvider') || 'auto';
+    const vModel = cfg?.get?.('visionModel') || '';
+    const ready = (id) => {
+      const p = getProvider(id);
+      if (!p || p.id === 'ollama') return null;
+      if (p.needsKey && !cfg?.getKey?.(p.id)) return null;
+      return { p, id: p.id, key: p.needsKey ? cfg.getKey(p.id) : undefined,
+               model: vModel || p.defaultModel };
+    };
+    if (vPref && vPref !== 'auto' && vPref !== 'ollama' && vPref !== 'local') {
+      const r = ready(vPref);
+      if (r) return r;
+    }
+    const cur = this.ai?.resolvedProvider;
+    if (cur && cur !== 'local' && cur !== 'ollama') {
+      const r = ready(cur);
+      if (r) return r;
+    }
+    for (const id of ['gemini', 'openrouter', 'openai', 'groq', 'anthropic']) {
+      const r = ready(id);
+      if (r) return r;
+    }
+    return null;
+  }
+
+  /**
+   * Send ONE image + prompt to the best available vision backend and collect
+   * the full text reply. Cloud provider first (when a key exists), the given
+   * local Ollama model otherwise. Returns a uniform result either way.
+   *
+   * @returns {Promise<{ok:boolean, text?:string, model?:string, ms?:number, message?:string}>}
+   */
+  async _readImage(prompt, image,
+                   { temperature = 0.1, localPick = null, trace = null, stageLabel = 'Read screen' } = {}) {
+    const backend = this.pickVisionBackend();
+    const t0 = Date.now();
+    let out = '';
+    if (backend) {
+      try {
+        for await (const d of backend.p.stream({
+          messages: [{ role: 'user', content: prompt }],
+          model: backend.model, key: backend.key, images: [image], temperature,
+        })) out += d;
+      } catch (err) {
+        trace?.fail(stageLabel, String(err?.message || err));
+        return { ok: false, message: `${stageLabel} failed via ${backend.id}: ${err?.message || err}` };
+      }
+      return { ok: true, text: out.trim(), model: `${backend.id}:${backend.model}`,
+               ms: Date.now() - t0, via: 'cloud' };
+    }
+    if (!localPick) {
+      return { ok: false,
+               message: 'No vision model available. Add an API key in Settings '
+                        + '(Gemini / OpenAI / Groq…) or run `ollama pull qwen2.5vl:7b` '
+                        + 'for a fully local reader.' };
+    }
+    try {
+      for await (const d of ollama.stream({
+        messages: [{ role: 'user', content: prompt }],
+        model: localPick, images: [image], temperature,
+      })) out += d;
+    } catch (err) {
+      trace?.fail(stageLabel, String(err?.message || err));
+      return { ok: false, message: `${stageLabel} failed: ${err?.message || err}` };
+    }
+    return { ok: true, text: out.trim(), model: localPick, ms: Date.now() - t0, via: 'local' };
+  }
+
   /**
    * Which pipeline should handle this question?
    * @param {string} question
@@ -189,11 +276,12 @@ export class ScreenAgent {
    * @returns {Promise<{ok:boolean, text?:string, model?:string, ms?:number, message?:string}>}
    */
   async transcribe(dataUrl, { grid = false, trace = null } = {}) {
-    const pick = this.pickOcrModel();
-    if (!pick) {
-      return { ok: false, message: 'No image-capable model installed. `ollama pull moondream` (1.7 GB) is the fastest option.' };
-    }
-    const t0 = Date.now();
+    // A keyed cloud provider can read the image — then no local model is
+    // required at all. Only when NO backend exists do we need a local one.
+    const backend = this.pickVisionBackend();
+    const pick = backend ? null : this.pickOcrModel();
+    if (pick) trace?.info('Choose reader', `${pick.name} — ${pick.reason}`);
+
     const prompt = grid
       ? 'Transcribe every piece of text you can read in this screenshot. The image '
         + `has a labelled ${GRID_COLS}x${GRID_ROWS} grid overlaid (columns A-${String.fromCharCode(64 + GRID_COLS)}, rows 1-${GRID_ROWS}). `
@@ -203,26 +291,17 @@ export class ScreenAgent {
         + 'Include button labels, headings, menu items and any error messages. '
         + 'Do not describe the image or add commentary — output the text only.';
 
-    let out = '';
-    try {
-      for await (const delta of ollama.stream({
-        messages: [{ role: 'user', content: prompt }],
-        model: pick.name,
-        images: [dataUrl],
-        temperature: 0.1,
-      })) out += delta;
-    } catch (err) {
-      trace?.fail('Read screen', String(err?.message || err));
-      return { ok: false, message: `Screen transcription failed: ${err?.message || err}` };
-    }
-    const ms = Date.now() - t0;
-    trace?.ok('Read screen', `${pick.name} → ${out.trim().length} chars in ${ms}ms`);
-    this.lastText = out.trim();
+    const r = await this._readImage(prompt, dataUrl, {
+      temperature: 0.1, localPick: pick?.name, trace, stageLabel: 'Read screen',
+    });
+    if (!r.ok) return r;
+    trace?.ok('Read screen', `${r.model} → ${r.text.length} chars in ${r.ms}ms`);
+    this.lastText = r.text;
     this.lastAt = Date.now();
     this.lastMode = 'ocr';
-    this.lastMs = ms;
-    if (grid) this.lastBoxes = parseGridRefs(out);
-    return { ok: true, text: out.trim(), model: pick.name, ms };
+    this.lastMs = r.ms;
+    if (grid) this.lastBoxes = parseGridRefs(r.text);
+    return { ok: true, text: r.text, model: r.model, ms: r.ms };
   }
 
   /**
@@ -304,10 +383,17 @@ export class ScreenAgent {
     if (!frame) return { ok: false, message: 'No screen frame yet.' };
     trace?.ok('Capture frame', `${geo.capturedWidth}x${geo.capturedHeight}, ${Math.round(frame.length / 1024)} KB`);
 
-    // Check we have a reader BEFORE doing the expensive grid render.
-    const pick = this.pickOcrModel();
-    if (!pick) return { ok: false, message: 'No image-capable model installed. Try `ollama pull moondream`.' };
-    trace?.info('Choose reader', `${pick.name} — ${pick.reason}`);
+    // Check we have a reader BEFORE doing the expensive grid render. A keyed
+    // cloud provider counts — the screenshot goes to the API model then, not
+    // to a local Ollama vision model we may not even have installed.
+    const backend = this.pickVisionBackend();
+    const pick = backend ? null : this.pickOcrModel();
+    if (!backend && !pick) {
+      return { ok: false, message: 'No vision model available. Add an API key in Settings '
+        + '(Gemini / OpenAI / Groq…) or `ollama pull qwen2.5vl:7b` for a local reader.' };
+    }
+    if (pick) trace?.info('Choose reader', `${pick.name} — ${pick.reason}`);
+    else trace?.ok('Choose reader', `${backend.id}:${backend.model} — configured API vision`);
 
     const gridded = await overlayGrid(frame, geo.capturedWidth, geo.capturedHeight);
     trace?.ok('Overlay grid', `${GRID_COLS}x${GRID_ROWS} labelled cells`);
@@ -318,19 +404,13 @@ export class ScreenAgent {
       + 'Reply with ONLY the grid cell it is in, like: C4\n'
       + 'If you cannot find it, reply exactly: NOTFOUND';
 
-    let out = '';
-    try {
-      for await (const delta of ollama.stream({
-        messages: [{ role: 'user', content: prompt }],
-        model: pick.name,
-        images: [gridded],
-        temperature: 0,
-      })) out += delta;
-    } catch (err) {
-      trace?.fail('Ask the model', String(err?.message || err));
-      return { ok: false, message: `Locate failed: ${err?.message || err}` };
-    }
-    trace?.ok('Model replied', out.trim().slice(0, 80) || '(empty)');
+    const read = await this._readImage(prompt, gridded, {
+      temperature: 0, localPick: pick?.name, trace, stageLabel: 'Locate',
+    });
+    if (!read.ok) return { ok: false, message: read.message };
+    const out = read.text;
+    const modelUsed = read.model;
+    trace?.ok('Model replied', out.slice(0, 80) || '(empty)');
 
     const cell = /\b([A-L])\s*-?\s*([1-8])\b/i.exec(out);
     if (!cell || /NOTFOUND/i.test(out)) {
@@ -355,7 +435,7 @@ export class ScreenAgent {
       trace?.warn('Map to desktop', scr.message);
       return {
         ok: true, cell: cellName, frameX: Math.round(cx), frameY: Math.round(cy),
-        model: pick.name, confidence: 'coarse', clickable: false,
+        model: modelUsed, confidence: 'coarse', clickable: false,
         reason: scr.message,
         message: `“${target}” is around cell ${cellName}. AURA's cursor is on it.\n\n`
           + `_Not clickable: ${scr.message}_`,
@@ -366,7 +446,7 @@ export class ScreenAgent {
     return {
       ok: true, x: scr.x, y: scr.y, cell: cellName,
       frameX: Math.round(cx), frameY: Math.round(cy),
-      model: pick.name, confidence: 'coarse', clickable: true,
+      model: modelUsed, confidence: 'coarse', clickable: true,
       message: `“${target}” is around cell ${cellName} → screen (${scr.x}, ${scr.y}).`,
     };
   }
@@ -439,48 +519,59 @@ export class ScreenAgent {
     if (!frame) return { ok: false, message: 'No screen frame yet.' };
     const geo = this.screen.geometry();
 
-    const describer = this.pickOcrModel();
-    if (!describer) return { ok: false, message: 'No image-capable model installed.' };
-    trace?.info('Stage 1 — describe', `${describer.name}${describer.weak ? ' (weak reader)' : ''}`);
+    // Cloud API vision first — the describer only needs a local model when
+    // no API key is configured at all.
+    const backend = this.pickVisionBackend();
+    const describer = backend ? null : this.pickOcrModel();
+    if (!backend && !describer) {
+      return { ok: false, message: 'No vision model available. Add an API key in Settings '
+        + '(Gemini / OpenAI / Groq…) or install a local one: `ollama pull qwen2.5vl:7b`.' };
+    }
+    trace?.info('Stage 1 — describe',
+      backend ? `${backend.id}:${backend.model}` : `${describer.name}${describer.weak ? ' (weak reader)' : ''}`);
 
     const gridded = await overlayGrid(frame, geo.capturedWidth, geo.capturedHeight);
-    let desc = '';
-    try {
-      for await (const d of ollama.stream({
-        messages: [{ role: 'user', content:
-          'Describe this screenshot. List every window title, button, menu item and '
-          + 'piece of text you can read, and say roughly where each one is using the '
-          + `grid labels drawn on the image (columns A-${String.fromCharCode(64 + GRID_COLS)}, `
-          + `rows 1-${GRID_ROWS}). Be factual and brief.` }],
-        model: describer.name, images: [gridded], temperature: 0.1,
-      })) desc += d;
-    } catch (err) {
-      trace?.fail('Stage 1', String(err?.message || err));
-      return { ok: false, message: `Screen description failed: ${err?.message || err}` };
-    }
-    desc = desc.trim();
+    const descRes = await this._readImage(
+      'Describe this screenshot. List every window title, button, menu item and '
+      + 'piece of text you can read, and say roughly where each one is using the '
+      + `grid labels drawn on the image (columns A-${String.fromCharCode(64 + GRID_COLS)}, `
+      + `rows 1-${GRID_ROWS}). Be factual and brief.`,
+      gridded, { temperature: 0.1, localPick: describer?.name, trace, stageLabel: 'Stage 1 — describe' });
+    if (!descRes.ok) return { ok: false, message: descRes.message };
+    const desc = descRes.text;
     trace?.ok('Stage 1 done', `${desc.length} chars — "${desc.slice(0, 70)}"`);
 
     if (desc.length < 15) {
       return { ok: false, message:
-        `**${describer.name} could not describe the screen** (${desc.length} characters).\n\n`
-        + 'That model is too weak for this. Install one that can actually read a screen:\n'
-        + '```\nollama pull qwen2.5vl:7b\n```' };
+        `**${descRes.model} could not describe the screen** (${desc.length} characters).\n\n`
+        + (backend
+          ? 'The configured API model returned almost nothing — check the key/model in Settings.'
+          : 'That model is too weak for this. Install one that can actually read a screen:\n'
+            + '```\nollama pull qwen2.5vl:7b\n```') };
     }
 
-    const planner = this.ai?.pickOllamaModel?.(instruction)?.name || ollama.installed?.[0];
-    if (!planner) return { ok: false, message: 'No text model available to plan with.' };
-    trace?.info('Stage 2 — plan', planner);
-
+    // Stage 2: turn the description into steps. Prefer the same cloud
+    // provider (text planning needs no image); local Ollama otherwise.
+    let planner;
     let raw = '';
+    const planMessages = [
+      { role: 'system', content: PLAN_SYSTEM(false) },
+      { role: 'user', content: `What is on screen:\n---\n${desc}\n---\n\nInstruction: ${instruction}` },
+    ];
     try {
-      for await (const d of ollama.stream({
-        messages: [
-          { role: 'system', content: PLAN_SYSTEM(false) },
-          { role: 'user', content: `What is on screen:\n---\n${desc}\n---\n\nInstruction: ${instruction}` },
-        ],
-        model: planner, temperature: 0.1,
-      })) raw += d;
+      if (backend) {
+        planner = `${backend.id}:${backend.model}`;
+        trace?.info('Stage 2 — plan', planner);
+        for await (const d of backend.p.stream({
+          messages: planMessages, model: backend.model, key: backend.key, temperature: 0.1,
+        })) raw += d;
+      } else {
+        const localPlanner = this.ai?.pickOllamaModel?.(instruction)?.name || ollama.installed?.[0];
+        if (!localPlanner) return { ok: false, message: 'No text model available to plan with.' };
+        planner = localPlanner;
+        trace?.info('Stage 2 — plan', planner);
+        for await (const d of ollama.stream({ messages: planMessages, model: planner, temperature: 0.1 })) raw += d;
+      }
     } catch (err) {
       trace?.fail('Stage 2', String(err?.message || err));
       return { ok: false, message: `Planning failed: ${err?.message || err}` };
@@ -493,7 +584,7 @@ export class ScreenAgent {
         || `Could not turn that description into steps.\n\nModel said: ${raw.trim().slice(0, 180)}` };
     }
     return { ok: true, intents: parsed.steps.slice(0, 8), planner, stage: 'two-stage',
-             describer: describer.name, salvaged: !!parsed.salvaged };
+             describer: descRes.model, salvaged: !!parsed.salvaged };
   }
 
   async plan(instruction, { trace = null } = {}) {

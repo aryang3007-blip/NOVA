@@ -75,10 +75,38 @@ chk(f"none of the {len(DESTRUCTIVE)} harmful commands run silently", prompt_all,
 chk("every confirmable one explains its consequence", explained_all)
 
 # Never executed without the user actually confirming.
-for cmd in ("rm -rf /", "format c:", "shutdown /s"):
+for cmd in ("rm -rf /",):
     r = bridge.run_command(cmd)
     chk(f"not executed unconfirmed: {cmd}",
         r["ok"] is False and r.get("needsConfirm") is True, str(r)[:70])
+
+print("\n\033[36m▸ CATASTROPHIC — HARD-BLOCKED UNDER 'ask', NO CONFIRM OVERRIDE\033[0m")
+# Disk erasure, power kills, registry/boot edits and account tampering are
+# refused outright under the default 'ask' policy — confirming must NOT
+# unlock them (only an explicit 'open' policy does).
+CATASTROPHIC = [
+    "format c:", "format C: /q", "diskpart", "mkfs.ext4 /dev/sda1",
+    "dd if=/dev/zero of=/dev/sda", "cipher /w:C:\\", "sdelete -p 3 C:\\x",
+    "shutdown /s /t 0", "reboot", "reg delete HKLM /f", "regedit /s bad.reg",
+    "bcdedit /set safeboot", "vssadmin delete shadows /all",
+    "net user hacker /add", "Set-ExecutionPolicy Unrestricted",
+    "Add-MpPreference -ExclusionPath C:\\",
+]
+cat_ok, cat_forced = True, True
+for cmd in CATASTROPHIC:
+    r = bridge.inspect_command(cmd)
+    if r["allowed"] or r["needsConfirm"]:
+        cat_ok = False
+        print(f"      \033[31mCONFIRMABLE/ALLOWED:\033[0m {cmd}")
+        continue
+    if not r.get("danger"):
+        print(f"      \033[33mno danger note:\033[0m {cmd}")
+    f = bridge.run_command(cmd, confirmed=True)
+    if f["ok"] or not f.get("blocked"):
+        cat_forced = False
+        print(f"      \033[31mCONFIRM BYPASSED:\033[0m {cmd} -> {str(f)[:60]}")
+chk(f"all {len(CATASTROPHIC)} catastrophic commands hard-refused under 'ask'", cat_ok)
+chk("confirmed=True cannot force a catastrophic command through", cat_forced)
 
 print("\n\033[36m▸ POLICY: 'strict' — HARD BLOCK, NOT CONFIRMABLE\033[0m")
 bridge.set_policy("strict")

@@ -75,7 +75,25 @@ class PersistenceAPIHandler:
             return {"ok": True, "phrases": wake_repo.get_all_phrases()}, 200
 
         if sub == "vault":
-            return {"ok": True, "providers": credential_vault.list_configured_providers()}, 200
+            return {"ok": True, "providers": credential_vault.list_configured_providers(),
+                    "profiles": credential_vault.profile_names()}, 200
+
+        if sub == "vault/profiles":
+            # Metadata only — previews and lengths, never plaintext.
+            return {"ok": True, "profiles": credential_vault.list_profiles()}, 200
+
+        if sub == "vault/reveal":
+            # Explicit owner action: return plaintext keys so a FRESH browser
+            # session can import them. Deliberately separate from every
+            # diagnostic route; only ever served same-origin by the local
+            # server this database belongs to.
+            prof = q.get("profile") or None
+            keys = credential_vault.reveal_profile(prof)
+            only = (q.get("provider") or "").strip().lower()
+            if only:
+                keys = {only: keys[only]} if only in keys else {}
+            return {"ok": True, "profile": prof or credential_vault.DEFAULT_PROFILE,
+                    "keys": keys}, 200
 
         if sub == "export":
             data = {
@@ -98,12 +116,13 @@ class PersistenceAPIHandler:
 
         if sub == "config":
             cfg = payload.get("config") if "config" in payload else payload
-            # Protect API keys if passed
+            # Protect API keys if passed — into the vault, NOT the config row.
             keys = cfg.get("apiKeys") if isinstance(cfg, dict) else None
+            key_profile = cfg.get("keyProfile") if isinstance(cfg, dict) else None
             if isinstance(keys, dict):
                 for prov, k in keys.items():
                     if k and isinstance(k, str) and not k.startswith("***"):
-                        credential_vault.set_key(prov, k)
+                        credential_vault.set_key(prov, k, profile=key_profile)
                 clean_cfg = dict(cfg)
                 clean_cfg.pop("apiKeys", None)
                 config_repo.set("aura.config.v1", clean_cfg)
@@ -140,7 +159,7 @@ class PersistenceAPIHandler:
 
         if sub == "memory/knowledge":
             res = memory_repo.add_knowledge_doc(
-                doc_id=payload.get("id") or f"k_{int(time.time()*1000)}",
+                doc_id=payload.get("id") or f"k_{memory_repo._new_id()}",
                 text=payload.get("text", ""),
                 title=payload.get("title"),
                 source=payload.get("source", "user"),
@@ -238,9 +257,10 @@ class PersistenceAPIHandler:
         if sub == "vault":
             prov = payload.get("provider")
             key = payload.get("key")
+            prof = payload.get("profile")
             if not prov:
                 return {"ok": False, "message": "Provider is required."}, 400
-            credential_vault.set_key(prov, key)
+            credential_vault.set_key(prov, key, profile=prof)
             return {"ok": True, "message": f"Credential saved securely for {prov}."}, 200
 
         if sub == "backup":
@@ -313,8 +333,9 @@ class PersistenceAPIHandler:
 
         if sub == "vault":
             prov = q.get("provider") or p.get("provider")
+            prof = q.get("profile") or p.get("profile")
             if prov:
-                credential_vault.delete_key(prov)
+                credential_vault.delete_key(prov, profile=prof)
                 return {"ok": True, "message": f"Credential deleted for {prov}."}, 200
             return {"ok": False, "message": "Provider is required."}, 400
 

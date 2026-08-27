@@ -343,14 +343,29 @@ export function registerScreenPlugin(registry, ctx) {
               + `\`${caps?.install?.[req.kind] || 'see docs'}\`\n\n`
               + 'AURA will not write a placeholder file instead.';
           }
-          const o = await outline({ kind: req.kind, topic: req.topic, ai: c.ai });
+          const o = await outline({
+            kind: req.kind, topic: req.topic, ai: c.ai,
+            slides: req.slides || 0, audience: req.audience || '',
+            // §15: research first, but only when the topic needs current facts.
+            research: async (t) => {
+              try {
+                const rr = await A.run('web_research', { query: t, depth: 'adaptive', maxResults: 5, readCount: 3 });
+                return (rr?.ok && rr?.context) ? String(rr.context).slice(0, 2200) : null;
+              } catch { return null; }
+            },
+          });
           if (!o.ok) return `⚠ ${o.message}`;
           const folder = c.ui?.docFolder?.() || undefined;
           const r = await A.docBuild(req.kind, o.spec, folder);
           if (!r?.ok) return `⚠ ${r?.message || 'Could not build the file.'}`;
+          const notes = [];
+          if (o.researched) notes.push('grounded in live web research');
+          if (o.deckReport?.repaired) notes.push('weak slides were auto-repaired by the model');
+          if (r.validation && !r.validation.ok) notes.push(`validation: ${r.validation.issues.slice(0, 2).join('; ')}`);
           const src = o.source === 'offline-template'
             ? '\n\n_Built from AURA\'s offline template — no model was available._'
-            : `\n\n_Outlined by ${o.source}._`;
+            : `\n\n_Outlined by ${o.source}${o.model ? ` (${o.model})` : ''}._`
+              + (notes.length ? `\n\n_${notes.join('. ')}._` : '');
           return `${DOC_KINDS[req.kind].icon} **${DOC_KINDS[req.kind].label} created**\n\n`
             + `${describeSpec(req.kind, o.spec)}\n\n`
             + `\`${r.path}\`  ·  ${(r.bytes / 1024).toFixed(1)} KB`

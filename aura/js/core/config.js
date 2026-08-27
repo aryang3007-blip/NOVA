@@ -14,6 +14,12 @@ const DEFAULTS = {
   provider: 'auto',            // auto | local | openai | anthropic | gemini | groq | openrouter | ollama
   model: '',                   // '' = provider default
   apiKeys: {},                 // { openai: 'sk-...', ... }
+  // ── Key vault profiles ────────────────────────────────────────────────
+  // Keys are mirrored server-side into the DPAPI vault (never the SQLite
+  // config row) under a NAMED profile. A fresh browser session — empty
+  // localStorage — can then import them back instead of making you re-paste.
+  keyProfile: 'default',       // which vault profile setKey() writes to
+  autoImportKeys: true,        // fresh sessions auto-import keys from the vault
   ollamaUrl: 'http://localhost:11434',
   // Hybrid routing: send short/simple turns to a local Ollama model (free,
   // private, fast) and only escalate hard ones to the cloud provider.
@@ -29,10 +35,26 @@ const DEFAULTS = {
   maxTokens: 1024,
   assistantName: 'NOVA',
   systemPrompt:
-    "You are NOVA (Next-gen Omnipresent Vision & Action assistant), an advanced human-like AI desktop assistant. " +
-    "You are precise, warm, quick-witted and never sycophantic. Address the user naturally. " +
-    "Keep spoken answers tight (2-5 sentences) unless asked to elaborate or to write code. " +
-    "You can see through a webcam when vision is enabled; scene context will be injected as a system note when available. " +
+    "IDENTITY\n" +
+    "You are NOVA — AURA's intelligent assistant and orchestration layer. Precise, warm, " +
+    "quick-witted, never sycophantic. You run on the user's own machine and act through " +
+    "real capabilities (apps, files, screen, documents, web research, paired devices).\n\n" +
+    "PRIMARY OBJECTIVE\n" +
+    "Understand what the user ACTUALLY wants, then accomplish it with the appropriate " +
+    "capability. Natural phrasing varies wildly — interpret intent, never keyword-match. " +
+    "Weak or telegraphic English is still a command if it asks for an action.\n\n" +
+    "OPERATING PRINCIPLES\n" +
+    "1. When the user asks you to DO something, do it through the action/tool protocol — " +
+    "do not answer with generic conversation instead of acting.\n" +
+    "2. Never pretend an action happened. Never invent tool results. Report only what the " +
+    "system actually returned, and say plainly when something failed or is unverifiable.\n" +
+    "3. Do not claim success without verification when verification is possible.\n" +
+    "4. Ambiguous request? Ask one short clarifying question instead of guessing wildly.\n" +
+    "5. Use the context provided (devices, tools, preferences, memory, screen state) — " +
+    "for example 'open my browser' means THEIR preferred browser when you know it.\n" +
+    "6. Destructive, explosive or security-weakening requests are refused briefly, with a " +
+    "safe alternative offered.\n" +
+    "7. Keep spoken answers tight (2-5 sentences) unless elaboration or code is requested. " +
     "Use markdown for code. Never invent capabilities you do not have.",
   memoryTurns: 20,             // conversation turns kept in the rolling window
   persistConversation: true,
@@ -184,12 +206,25 @@ function safeParse(raw) {
   try { return JSON.parse(raw) || {}; } catch { return {}; }
 }
 
+// The old default system prompt, used to detect-and-upgrade installs whose
+// saved config still carries it (saved rows win merges, so the new operating
+// prompt would otherwise never reach existing users).
+const LEGACY_SYSTEM_PROMPT_PREFIX = 'You are NOVA (Next-gen Omnipresent Vision & Action assistant)';
+
 class Config {
   constructor() {
     this._mem = null;                      // fallback store
     this.data = { ...DEFAULTS, ...this._read() };
     // deep-ish merge for nested apiKeys
     this.data.apiKeys = { ...DEFAULTS.apiKeys, ...(this.data.apiKeys || {}) };
+    // If the saved system prompt is just the old default, move to the new
+    // operating prompt. A genuinely customised prompt is left untouched.
+    if (typeof this.data.systemPrompt === 'string'
+        && this.data.systemPrompt.startsWith(LEGACY_SYSTEM_PROMPT_PREFIX)
+        && this.data.systemPrompt !== DEFAULTS.systemPrompt) {
+      this.data.systemPrompt = DEFAULTS.systemPrompt;
+      this._write?.(this.data);
+    }
     this.listeners = new Set();
   }
 
@@ -256,12 +291,76 @@ class Config {
     if (cleanKey) keys[prov] = cleanKey; else delete keys[prov];
     this.set('apiKeys', keys);
 
-    // Save into hardware/OS DPAPI Vault
+    // Save into hardware/OS DPAPI Vault under the active profile
     if (typeof fetch === 'function') {
+      const profile = this.data.keyProfile || 'default';
       import('./persistence-client.js').then(({ persistenceClient }) => {
-        persistenceClient.saveCredential(prov, cleanKey).catch(() => {});
+        persistenceClient.saveCredential(prov, cleanKey, profile).catch(() => {});
       }).catch(() => {});
     }
+  }
+
+  /**
+   * Repopulate apiKeys from the server-side vault. Called automatically on
+   * boot when this browser has no keys of its own (fresh profile/session);
+   * also callable directly to switch profiles.
+   *
+   * Profile choice: the configured `keyProfile` wins if it holds keys, else
+   * 'default', else whichever profile stores the most providers.
+   *
+   * @param {{force?:boolean, profile?:string}} [opts]
+   *   force   — import even though this browser already has keys locally
+   *   profile — import from exactly this profile (also becomes keyProfile)
+   * @returns {Promise<number>} how many provider keys were imported
+   */
+  async restoreKeysFromVault({ force = false, profile = null } = {}) {
+    if (typeof fetch !== 'function') return 0;
+    if (!force && this.data.autoImportKeys === false) return 0;
+    const local = this.data.apiKeys || {};
+    if (!force && Object.values(local).some(k => typeof k === 'string' && k.trim())) return 0;
+    try {
+      const { persistenceClient } = await import('./persistence-client.js');
+      const profiles = await persistenceClient.getVaultProfiles();
+      const names = Object.keys(profiles || {});
+      if (!names.length) return 0;
+
+      let chosen = profile;
+      if (!chosen) {
+        const wanted = this.data.keyProfile || 'default';
+        if (names.includes(wanted)) chosen = wanted;
+        else if (names.includes('default')) chosen = 'default';
+        else chosen = names.sort((a, b) =>
+          Object.keys(profiles[b] || {}).length - Object.keys(profiles[a] || {}).length)[0];
+      }
+
+      const keys = await persistenceClient.revealCredentials({ profile: chosen });
+      if (!keys || !Object.keys(keys).length) return 0;
+
+      const merged = { ...(this.data.apiKeys || {}) };
+      let imported = 0;
+      for (const [prov, k] of Object.entries(keys)) {
+        if (!k || typeof k !== 'string') continue;
+        if (!force && merged[prov]) continue;          // local wins unless forced
+        merged[prov] = k.trim();
+        imported++;
+      }
+      this.set({ apiKeys: merged, ...(profile ? { keyProfile: chosen } : {}) });
+      try {
+        const { bus } = await import('./bus.js');
+        bus.emit('config:keys-imported', { profile: chosen, count: imported });
+      } catch {}
+      return imported;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * User-facing profile switch: pull keys from a named profile, replacing
+   * this browser's current set, and make it the profile setKey() writes to.
+   */
+  async importKeysFromProfile(name) {
+    return this.restoreKeysFromVault({ force: true, profile: String(name || '').trim().toLowerCase() || null });
   }
 
   onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -280,9 +379,16 @@ class Config {
 }
 
 export const config = new Config();
-// Attempt initial database synchronization
+// Attempt initial database synchronization, then recover API keys from the
+// vault when this browser has none (new session/profile). Keys live in the
+// DPAPI vault file, not the DB row — so this runs even if the config row is
+// missing or empty.
 if (typeof fetch === 'function') {
-  config.syncWithDatabase().catch(() => {});
+  config.syncWithDatabase()
+    .catch(() => {})
+    .then(() => config.restoreKeysFromVault())
+    .then(n => { if (n) console.info(`[config] imported ${n} API key(s) from the vault`); })
+    .catch(() => {});
 }
 export { Config, DEFAULTS };
 export default config;

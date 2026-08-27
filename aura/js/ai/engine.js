@@ -21,6 +21,10 @@ import { localRespond, chunkText } from './local-core.js';
 import { liveData } from '../realtime/live-data.js';
 import { extractActions, describeResult } from './action-parser.js';
 import { intentRouter, ROUTE } from './intent-router.js';
+import * as docAgent from './doc-agent.js';
+import * as router from './router.js';
+import { buildContextPacket } from './context-packet.js';
+import { looksActionable, semanticToolSelect, verifyAndNarrate } from './semantic-tools.js';
 import { ModelRegistry, TASK } from './model-registry.js';
 import { extractToolCalls, normalizeToolCall, validateToolCall, toToolResult,
          buildToolManifest, toolProtocolPrompt, TOOLS } from './tools.js';
@@ -219,6 +223,9 @@ export class AIEngine {
 
     if (this._memoryContext) parts.push(this._memoryContext);
 
+    // Structured context packet (devices, usable tools, relevant prefs).
+    if (this._contextPacket?.systemNote) parts.push(this._contextPacket.systemNote);
+
     const pluginCtx = this.plugins?.collectContext?.();
     if (pluginCtx) parts.push(`Plugin context:\n${pluginCtx}`);
 
@@ -289,6 +296,18 @@ export class AIEngine {
       } catch (e) { console.warn('[memory] context build failed', e); }
     }
 
+    // ── CONTEXT PACKET (spec §7): bounded, RELEVANT context — devices,
+    //    actually-usable tools, preferences/memory matching this request,
+    //    runtime state. Never a database dump.
+    try {
+      this._contextPacket = await buildContextPacket({
+        userText: input,
+        engine: this,
+        devices: this.deviceManager || this.orchestrator?.deviceManager || this.runtime?.devices,
+        conversationHints: (this.memory.window?.() || []).slice(-2).map(m => m.content || ''),
+      });
+    } catch { this._contextPacket = null; }
+
     // ── PRIORITY INTENT ROUTER
     //    One ordered pipeline replaces the old first-match-wins matchers.
     //    Math now outranks web lookup, which is why "what is 47*89" can no
@@ -322,6 +341,21 @@ export class AIEngine {
       if (handled) return;
     }
 
+    // ── SEMANTIC ACTION FALLBACK — the end of hardcoded voice commands.
+    //    Deterministic stages passed, but the message still reads like a
+    //    request to ACT ("can you open YouTube?", "put YouTube on my phone",
+    //    "make me a deck on X"). The CONFIGURED model maps it onto the
+    //    capability registry; we then execute through the real pipeline and
+    //    report the REAL result. Questions are untouched: looksActionable()
+    //    refuses them before any model call is spent.
+    if (decision.route === ROUTE.CONVERSATION || decision.route === ROUTE.TOOL) {
+      try {
+        if (await this._runSemanticAction(input)) return;
+      } catch (e) {
+        bus.emit(EV.LOG, { text: `[semantic] ${e?.message || e}`, kind: 'warn' });
+      }
+    }
+
     // MATH and LOCAL fall through to the offline core below, which already
     // handles them correctly — the router just guarantees they get there
     // before any web lookup can intercept.
@@ -331,6 +365,181 @@ export class AIEngine {
     } else {
       await this._respondRemote();
     }
+  }
+
+  /**
+   * Model-driven action fallback (spec §5/§9). Returns true iff a tool was
+   * selected, executed AND narrated — otherwise the caller continues to
+   * normal conversation.
+   * @param {string} input
+   */
+  async _runSemanticAction(input) {
+    if (!looksActionable(input)) return false;
+    const sel = await semanticToolSelect(input, {
+      engine: this, deviceSummary: this._deviceSummaryText(),
+    });
+    if (!sel?.ok || !sel.call) return false;
+
+    bus.emit('ai:semantic-action', { input, call: sel.call, provider: sel.provider, model: sel.model });
+
+    let res;
+    if (sel.call.device) {
+      // A device clause was extracted ("open YouTube ON MY PHONE"): the
+      // action runs on the companion device, never on this machine.
+      const targetArg = sel.call.parameters?.application || sel.call.parameters?.url
+        || sel.call.parameters?.query || '';
+      res = await this._runNovaService({
+        tool: 'device_action',
+        parameters: {
+          device: sel.call.device,
+          action: sel.call.tool === 'launch_application' ? 'open_app' : sel.call.tool,
+          params: targetArg ? { app: targetArg } : (sel.call.parameters || {}),
+        },
+      }, input);
+    } else if (sel.call.service || sel.call.tool === 'device_action') {
+      res = await this._runNovaService(sel.call, input);
+    } else {
+      res = await this.executeToolCall(sel.call, 'semantic');
+    }
+
+    const narr = verifyAndNarrate(sel.call.tool, res);
+
+    // Global task log: every agent action becomes an episode with its
+    // outcome, viewable via /api/db/memory/episodes and the dev trace.
+    try {
+      await this.memoryManager?.episodic?.record(
+        `${sel.call.tool}: ${(narr.text || '').slice(0, 140)}`,
+        { why: `natural request "${input.slice(0, 90)}" → ${narr.ok ? 'completed' : 'failed'}`,
+          source: 'semantic-router' });
+    } catch {}
+
+    const text = (sel.say && narr.ok ? `${sel.say}\n\n` : '') + narr.text;
+    await this._streamLocalText(text, { emotion: narr.ok ? 'confident' : 'confused' });
+    return true;
+  }
+
+  /**
+   * Execute a NOVA service capability (documents, research, screen, devices,
+   * tasks). Honest results only — each branch says plainly when the backing
+   * capability is unavailable rather than pretending.
+   */
+  async _runNovaService(call, rawInput) {
+    const p = call.parameters || {};
+    switch (call.service || call.tool) {
+
+      case 'docgen': {
+        const A = this.actions;
+        if (!A?.available) {
+          return { success: false, message: 'The desktop bridge is off — restart with `--allow-actions` and I can create the file.' };
+        }
+        const kind = ['pptx', 'docx', 'xlsx'].includes(String(p.kind || '').toLowerCase())
+          ? String(p.kind).toLowerCase() : 'pptx';
+        const caps = await A.docCapabilities().catch(() => null);
+        if (!caps?.[kind]) {
+          return { success: false, message: `${kind} generation needs its Python library (${caps?.install?.[kind] || 'see requirements.txt'}).` };
+        }
+        const o = await docAgent.outline({
+          kind, topic: String(p.topic || rawInput), engine: this,
+          slides: Number(p.slides) || 0, audience: String(p.audience || ''),
+          research: (t) => this._researchDigest(t),
+        });
+        if (!o.ok) return { success: false, message: o.message || 'Outline failed.' };
+        const r = await A.docBuild(kind, o.spec, config.get('docFolder') || undefined);
+        if (!r?.ok) return { success: false, message: r?.message || 'Could not build the file.' };
+        const extras = [];
+        if (o.source === 'offline-template') extras.push('built from the offline template — no model was available');
+        if (o.researched) extras.push('grounded in live web research');
+        if (o.deckReport && !o.deckReport.ok && o.deckReport.repaired) extras.push('weak slides were auto-repaired');
+        if (r.validation && !r.validation.ok) extras.push(`validation notes: ${r.validation.issues.slice(0, 2).join('; ')}`);
+        return { success: true,
+                 message: `Created ${docAgent.describeSpec(kind, o.spec)} → \`${r.path}\``
+                          + (extras.length ? `\n\n_${extras.join('. ')}._` : '') };
+      }
+
+      case 'research': {
+        const digest = await this._researchDigest(String(p.topic || rawInput));
+        if (!digest) {
+          return { success: false, message: 'Web research is unavailable (needs the bridge with `--allow-actions` and ddgs/trafilatura installed).' };
+        }
+        // Summarise through the configured model — a second honest step, so
+        // the spoken answer is synthesis, not a raw link dump.
+        const sum = await router.complete({
+          messages: [
+            { role: 'system', content: 'You are NOVA. Summarise research into a tight spoken answer (3-6 sentences), naming sources by site. No filler.' },
+            { role: 'user', content: `Question: ${String(p.topic || rawInput)}\n\nResearch:\n${digest}` },
+          ],
+          engine: this, temperature: 0.4, maxTokens: 700, timeoutMs: 60000,
+        });
+        return { success: true, message: (sum.ok && sum.text) || digest.slice(0, 1200) };
+      }
+
+      case 'screen': {
+        const agent = this.screenAgent;
+        if (!agent?.screen?.active) {
+          return { success: false, message: 'No screen is being shared. Start one in AURA Live (`/screen`) and ask again.' };
+        }
+        const r = await agent.ask(String(p.question || 'What is on my screen?'));
+        return { success: !!r.ok, message: r.message || (r.ok ? '' : 'Could not read the screen.') };
+      }
+
+      case 'device_action': {
+        const dm = this.deviceManager || this.orchestrator?.deviceManager || this.runtime?.devices;
+        if (!dm) return { success: false, message: 'No device gateway on this machine.' };
+        const ref = String(p.device || '').toLowerCase();
+        const list = (dm.listDevices?.() || []);
+        const dev = list.find(d =>
+          [d.id, d.name, d.kind, d.platform].filter(Boolean)
+            .some(v => String(v).toLowerCase().includes(ref)))
+          || (['phone', 'mobile', 'android', 'iphone'].includes(ref)
+              && list.find(d => String(d.kind || '').toLowerCase() === 'phone'));
+        if (!dev) {
+          return { success: false,
+                   message: list.length
+                     ? `Device "${p.device}" isn't paired. I can see: ${list.map(d => d.name || d.id).join(', ')}.`
+                     : `No devices are paired, so I can't reach "${p.device}". Pair your phone from the Devices page first.` };
+        }
+        const r = await dm.dispatchToDevice(dev.id, { action: p.action, params: p.params || {} }).catch(e => ({ ok: false, message: e?.message || String(e) }));
+        if (r?.ok === false) return { success: false, message: r.message || `Couldn't run "${p.action}" on ${dev.name || dev.id}.` };
+        return { success: true, message: `Sent "${p.action}" to ${dev.name || dev.id}.` };
+      }
+
+      case 'tasks': {
+        const epi = this.memoryManager?.episodic;
+        if (!epi) return { success: false, message: 'Task memory is not initialised.' };
+        if (String(p.op || '').includes('create') && p.title) {
+          await epi.record(String(p.title).slice(0, 140), { why: 'user-created task', source: 'semantic-router' });
+          return { success: true, message: `Task noted: ${p.title}` };
+        }
+        const all = (epi.all?.() || []).slice(-8);
+        if (!all.length) return { success: true, message: 'No tasks recorded yet.' };
+        return { success: true, message: 'Recent activity:\n' + all.map((e, i) => `${i + 1}. ${e.event}`).join('\n') };
+      }
+
+      default:
+        return { success: false, message: `I don't know how to run "${call.tool}" yet.` };
+    }
+  }
+
+  /** Web research through the bridge; returns a digest string or null. */
+  async _researchDigest(topic) {
+    try {
+      const A = this.actions;
+      if (!A?.available) return null;
+      const r = await A.run('web_research', { query: String(topic), depth: 'adaptive', maxResults: 5, readCount: 3 });
+      return (r?.ok && r?.context) ? String(r.context).slice(0, 2200) : null;
+    } catch { return null; }
+  }
+
+  /** One-line prompt-side summary of paired devices for the selector. */
+  _deviceSummaryText() {
+    try {
+      const dm = this.deviceManager || this.orchestrator?.deviceManager || this.runtime?.devices;
+      const list = dm?.listDevices?.() || [];
+      if (!list.length) return 'none paired';
+      return list.slice(0, 6)
+        .map(d => `${d.name || d.id}${d.kind ? ` (${d.kind})` : ''}${d.status === 'connected' ? '' : ' offline'}`)
+        .join(', ');
+    } catch { return ''; }
   }
 
   /**
@@ -716,6 +925,18 @@ export class AIEngine {
       if (curP && curP !== 'ollama' && curP !== 'local' && config.getKey(curP)) {
         targetProvider = curP;
         targetModel = vModelPref || this.resolvedModel || getProvider(curP)?.defaultModel;
+      }
+      // Chat is running locally but another provider HAS a key — use that.
+      // (Otherwise a screenshot went to a local model even though the user
+      // configured cloud vision, which read as "not sending screenshots to
+      // the API model".)
+      if (!targetProvider) {
+        for (const id of ['gemini', 'openrouter', 'openai', 'groq', 'anthropic']) {
+          if (!config.getKey(id)) continue;
+          targetProvider = id;
+          targetModel = vModelPref || getProvider(id)?.defaultModel;
+          break;
+        }
       }
     }
 

@@ -1008,37 +1008,6 @@ class AuraApp {
     bindCheck('set-wake', 'wakeWordEnabled', (v) => this.setWakeWord(v));
     bindText('set-wakeword', 'wakeWord');
 
-    // Porcupine engine settings
-    const wakeEngineSel = $('set-wake-engine');
-    const picoKeyEl     = $('set-picovoice-key');
-    const picoModelEl   = $('set-wakeword-model');
-    const picoSettings  = $('porcupine-settings');
-    const voiceActSel   = $('set-voice-activation');
-
-    const updatePorcupineVisibility = () => {
-      const eng = config.get('wakeWordEngine') || 'browser';
-      if (picoSettings) picoSettings.style.display = (eng === 'porcupine') ? '' : 'none';
-    };
-
-    if (wakeEngineSel) {
-      wakeEngineSel.addEventListener('change', () => {
-        config.set('wakeWordEngine', wakeEngineSel.value);
-        updatePorcupineVisibility();
-        // Re-apply wake word with new engine if it's currently on
-        if (config.get('wakeWordEnabled')) this.setWakeWord(true);
-      });
-    }
-    if (picoKeyEl) {
-      picoKeyEl.addEventListener('change', () => config.set('picovoiceKey', picoKeyEl.value.trim()));
-    }
-    if (picoModelEl) {
-      picoModelEl.addEventListener('change', () => config.set('wakeWordModelUrl', picoModelEl.value.trim()));
-    }
-    if (voiceActSel) {
-      voiceActSel.addEventListener('change', () => config.set('voiceActivation', voiceActSel.value));
-    }
-    updatePorcupineVisibility();
-
     // Wake Word Tag Manager UI
     const wakeTagContainer = $('wakeword-tags');
     const wakeInput = $('wakeword-add-input');
@@ -1194,13 +1163,6 @@ class AuraApp {
     $('set-wake').checked = c.wakeWordEnabled;
     if ($('set-wakeword')) $('set-wakeword').value = c.wakeWord || '';
     this._renderWakeTags?.();
-    if ($('set-wake-engine')) $('set-wake-engine').value = c.wakeWordEngine || 'browser';
-    if ($('set-picovoice-key')) $('set-picovoice-key').value = c.picovoiceKey || '';
-    if ($('set-wakeword-model')) $('set-wakeword-model').value = c.wakeWordModelUrl || '';
-    if ($('set-voice-activation')) $('set-voice-activation').value = c.voiceActivation || 'push-to-talk';
-    // show/hide Porcupine panel
-    const picoPanel = $('porcupine-settings');
-    if (picoPanel) picoPanel.style.display = (c.wakeWordEngine === 'porcupine') ? '' : 'none';
     $('voice-support').className = this.voice.input.supported ? 'note good' : 'note bad';
     $('voice-support').innerHTML = this.voice.input.supported
       ? '✓ Speech recognition is available in this browser.'
