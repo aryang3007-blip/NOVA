@@ -240,6 +240,30 @@ DESTRUCTIVE_PATTERNS = [
     r"\bc:\\?\s*$", r"^\s*/\s*$",              # bare drive/root targets
 ]
 
+# CATASTROPHIC commands: refused under BOTH 'ask' and 'strict'. Only the
+# fully-explicit 'open' policy can run them. Rationale: "ask before harmful"
+# must never mean "one mis-click (or one convincing agent narration) erases
+# the disk / kills the machine / opens the registry". Below this line, no
+# confirmation exists that makes the blast radius acceptable.
+CATASTROPHIC_PATTERNS = [
+    # Disk erasure / repartition / secure-wipe
+    r"\bformat\b", r"\bmkfs\b", r"\bdd\b", r"\bfdisk\b", r"\bdiskpart\b",
+    r"\bcipher\b", r"\bsdelete\b", r"\bwbadmin\b",
+    r"(?:^|\s)clear-disk", r"(?:^|\s)format-volume",
+    # Registry / boot / execution policy / restore points
+    r"\breg\b", r"\bregedit\b", r"\bbcdedit\b", r"\bvssadmin\b",
+    r"(?:^|\s)set-executionpolicy", r"(?:^|\s)disable-computerrestore",
+    # Power: losing the machine mid-task is data loss too
+    r"\bshutdown\b", r"\breboot\b", r"\bhalt\b", r"\bpoweroff\b",
+    r"(?:^|\s)stop-computer", r"(?:^|\s)restart-computer",
+    # Account / credential tampering
+    r"\bnet\s+user\b", r"\bnet\s+localgroup\b",
+    # Weakening the antivirus so something worse can run
+    r"(?:^|\s)add-mppreference", r"(?:^|\s)set-mppreference",
+    r"(?:^|\s)remove-mppreference",
+    r":\(\)\s*\{.*\};:",                 # fork bomb
+]
+
 # Shell metacharacters that would allow chaining a second command.
 SHELL_META = re.compile(r"[;&|`$><\n\r]|\$\(|&&|\|\|")
 
@@ -250,9 +274,10 @@ SHELL_META = re.compile(r"[;&|`$><\n\r]|\$\(|&&|\|\|")
 # should ASK before anything harmful. TERMINAL_POLICY controls how strict the
 # classifier is and is changed from Settings → Desktop → Terminal Policy.
 #
-#   'ask'    (default) nothing is permanently blocked. Read-only commands run
-#            straight away; ANY command that could modify the system requires
-#            an explicit confirmation that names what it will do.
+#   'ask'    (default) read-only commands run straight away; anything that
+#            could modify the system requires an explicit confirmation that
+#            names what it will do. CATASTROPHIC commands (see that list) are
+#            the one exception: refused outright, no confirmation possible.
 #   'strict' the original behaviour — destructive verbs are refused outright
 #            and cannot be confirmed. Choose this if AURA is unattended.
 #   'open'   everything runs with no confirmation. You are on your own; the
@@ -282,7 +307,8 @@ def get_policy():
             {"id": "ask", "label": "Ask before anything harmful",
              "detail": "Read-only commands run immediately. Anything that could change "
                        "your system asks first and tells you exactly what it will do. "
-                       "Recommended."},
+                       "Disk-erasing, power, registry and account commands are never "
+                       "run at all. Recommended."},
             {"id": "strict", "label": "Block destructive commands entirely",
              "detail": "Destructive commands (format, del /f, diskpart, shutdown…) are "
                        "refused and cannot be confirmed. Safest for unattended use."},
@@ -352,6 +378,7 @@ def _classify_command(cmdline, policy=None):
     prog = prog[:-4] if prog.endswith(".exe") else prog
 
     is_destructive = any(re.search(pat, low) for pat in DESTRUCTIVE_PATTERNS)
+    is_catastrophic = any(re.search(pat, low) for pat in CATASTROPHIC_PATTERNS)
     deny = SAFE_SUBCOMMAND_DENY.get(prog)
     is_risky_sub = bool(deny and len(argv) > 1 and argv[1].lower() in deny)
     is_safe = prog in SAFE_COMMANDS and not is_risky_sub and not is_destructive
@@ -360,6 +387,19 @@ def _classify_command(cmdline, policy=None):
         return {"allowed": True, "needs_confirm": False, "argv": argv,
                 "danger": explain_command(argv) if is_destructive else None,
                 "reason": "Policy is 'open' — running without confirmation."}
+
+    # Hard stop underneath every policy except an explicit 'open'. This is
+    # the guarantee that an agent loop — however persuasive its plan — can
+    # never reach disk erasure, power kills, registry edits or account
+    # tampering through AURA.
+    if is_catastrophic:
+        return {"allowed": False, "needs_confirm": False, "argv": argv,
+                "danger": explain_command(argv),
+                "reason": ("Hard-blocked for safety: this command can erase a disk, "
+                           "shut the machine down, edit the registry/boot config or "
+                           "tamper with accounts — no confirmation makes that safe, so "
+                           "AURA refuses it under every policy except an explicit 'open'. "
+                           f"What it tried to do: {explain_command(argv)}")}
 
     if pol == "strict" and is_destructive:
         return {"allowed": False, "needs_confirm": False, "argv": argv,

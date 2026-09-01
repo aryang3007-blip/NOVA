@@ -79,6 +79,45 @@ _pairing = {"code": None, "expires": 0}
 _counter = {"n": 0}
 
 
+def _load_saved_devices():
+    """Restore paired companion devices from SQLite."""
+    try:
+        from persistence.repositories import device_repo
+        saved = device_repo.get_all_devices()
+        for d in saved:
+            did = d["id"]
+            _devices[did] = {
+                "id": did,
+                "name": d["name"],
+                "platform": d["platform"],
+                "kind": d.get("kind", "phone"),
+                "capabilities": d["capabilities"],
+                "token": d["token"],
+                "pairedAt": d.get("pairedAt", _now()),
+                "lastSeen": d.get("lastSeen", 0),
+                "battery": d.get("battery"),
+                "latencyMs": d.get("latencyMs"),
+                "actionsSent": 0,
+                "actionsAcked": 0,
+            }
+            _queues[did] = []
+            try:
+                # Update counter if platform-num format
+                num_part = int(did.split("-")[-1])
+                if num_part > _counter["n"]:
+                    _counter["n"] = num_part
+            except Exception:
+                pass
+        if saved:
+            print(f"[DEVICES] Restored {len(saved)} paired companion device(s) from SQLite.", flush=True)
+    except Exception as e:
+        pass
+
+# Initialize on import
+_load_saved_devices()
+
+
+
 def _log(kind, **extra):
     _events.append({"kind": kind, "at": time.time(), **extra})
     if len(_events) > 120:
@@ -303,6 +342,22 @@ def pair(code, name, platform="android", capabilities=None, kind=None):
         _pairing["code"] = None
         _pairing["expires"] = 0
         _log("paired", device=did, name=_devices[did]["name"])
+
+        # Persist to SQLite
+        try:
+            from persistence.repositories import device_repo
+            device_repo.save_device(
+                device_id=did,
+                name=_devices[did]["name"],
+                platform=plat,
+                kind=_devices[did]["kind"],
+                token=token,
+                capabilities=caps,
+                paired_at=_devices[did]["pairedAt"]
+            )
+        except Exception:
+            pass
+
         return {"ok": True, "deviceId": did, "token": token,
                 "device": _public(_devices[did]),
                 "heartbeatMs": int(HEARTBEAT_TIMEOUT * 1000 / 3),
@@ -316,6 +371,13 @@ def unpair(device_id):
         if not d:
             return {"ok": False, "message": "No such device."}
         _log("unpaired", device=device_id)
+
+        try:
+            from persistence.repositories import device_repo
+            device_repo.unpair_device(device_id)
+        except Exception:
+            pass
+
         return {"ok": True, "message": f"Unpaired {d['name']}."}
 
 
@@ -342,7 +404,15 @@ def heartbeat(device_id, token, info=None):
             d["capabilities"] = [c for c in info["capabilities"] if c in KNOWN_CAPABILITIES]
         if not was:
             _log("connected", device=device_id)
+
+        try:
+            from persistence.repositories import device_repo
+            device_repo.update_heartbeat(device_id, battery=d.get("battery"), latency_ms=d.get("latencyMs"), caps=d.get("capabilities"))
+        except Exception:
+            pass
+
         return {"ok": True, "device": _public(d)}
+
 
 
 def poll(device_id, token, wait=POLL_TIMEOUT):

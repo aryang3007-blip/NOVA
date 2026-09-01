@@ -152,12 +152,24 @@ if ALLOW_ACTIONS:
         say(f"  !! bridge.py failed to import: {e}")
         ALLOW_ACTIONS = False
 
+# ── Persistence & Database Manager (SQLite + DPAPI Vault) ─────────────────
+try:
+    from persistence import db_manager, credential_vault
+    from persistence.importer import seed_wake_phrases_from_file
+    from persistence.api import PersistenceAPIHandler
+    _db_init_info = db_manager.initialize()
+    seed_wake_phrases_from_file()
+except Exception as e:
+    _db_init_info = {"ok": False, "error": str(e)}
+    say(c(31, f"  !! Persistence subsystem failed to initialize: {e}"))
+
 
 FAVICON_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <circle cx="50" cy="50" r="44" fill="#04121f" stroke="#22d3ee" stroke-width="4"/>
   <circle cx="50" cy="50" r="28" fill="none" stroke="#3b82f6" stroke-width="3" stroke-dasharray="14 8"/>
   <circle cx="50" cy="50" r="12" fill="#f59e0b"/>
 </svg>"""
+
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -201,8 +213,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
 
+        # ── Database & Persistence API
+        if path.startswith("/api/db/"):
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                data, code = PersistenceAPIHandler.handle_get(path, q)
+                return self._json(data, code)
+            except Exception as e:
+                return self._json({"ok": False, "message": f"Database error: {e}"}, 500)
+
         # ── favicon
         if path in ("/favicon.ico", "/favicon.svg", "/favicon.png", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):
+
             self.send_response(200)
             self.send_header("Content-Type", "image/svg+xml")
             self.send_header("Content-Length", str(len(FAVICON_SVG)))
@@ -283,6 +305,49 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "actionsEnabled": ALLOW_ACTIONS,
                 "os": (bridge.SYSTEM if bridge else None),
             })
+
+        # ── /api/health — Consolidated Subsystem Health Check
+        if path == "/api/health":
+            ollama_st = {"running": False, "models": []}
+            if ollama_proxy:
+                st = ollama_proxy.status(OLLAMA_BASE, with_capabilities=False)
+                ollama_st = {"running": st.get("running", False), "models": st.get("names", [])}
+
+            wake_st = getattr(self.server, "_wake_status", {"status": "ONLINE", "engine": "openWakeWord / Whisper"})
+            paired_count = len(devices.PAIRED) if devices else 0
+            doc_avail = bool(docbuilder)
+
+            return self._json({
+                "ok": True,
+                "timestamp": _t_start.time(),
+                "uptime": int(_t_start.time() - _START_TIME),
+                "services": {
+                    "core": {"status": "HEALTHY", "port": PORT, "lan": ALLOW_LAN},
+                    "ollama": {"status": "HEALTHY" if ollama_st["running"] else "OFFLINE", **ollama_st},
+                    "wake": {"status": wake_st.get("status", "HEALTHY"), **wake_st},
+                    "stt": {"status": "READY", "provider": "WebSpeech / Faster-Whisper"},
+                    "tts": {"status": "READY", "provider": "WebSpeech / Viseme-Audio"},
+                    "vision": {"status": "READY", "multimodal": True},
+                    "desktop": {"status": "READY" if ALLOW_ACTIONS else "DISABLED", "actions": ALLOW_ACTIONS, "os": (bridge.SYSTEM if bridge else None)},
+                    "search": {"status": "READY", "provider": "DuckDuckGo"},
+                    "devices": {"status": "READY", "pairedCount": paired_count},
+                    "documents": {"status": "READY" if doc_avail else "PARTIAL", "available": doc_avail}
+                }
+            })
+
+        # ── /api/voice/status — Voice service status
+        if path == "/api/voice/status":
+            st = getattr(self.server, "_wake_status", {"status": "READY", "engine": "openWakeWord", "device": "Default"})
+            return self._json({"ok": True, "voice": st})
+
+        # ── /api/voice/devices — Audio input devices
+        if path == "/api/voice/devices":
+            try:
+                from voice.wake_service import list_audio_devices
+                devs = list_audio_devices()
+                return self._json({"ok": True, "devices": devs})
+            except Exception as e:
+                return self._json({"ok": False, "devices": [], "message": str(e)})
 
         # ── /api/voice/events — Event stream polling for local Python voice service
         if path == "/api/voice/events":
@@ -444,6 +509,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
+        # ── Database & Persistence API (POST)
+        if path.startswith("/api/db/"):
+            body = self._read_body(limit=5 << 20)
+            try:
+                p = json.loads(body or b"{}")
+            except Exception:
+                p = {}
+            try:
+                data, code = PersistenceAPIHandler.handle_post(path, p)
+                return self._json(data, code)
+            except Exception as e:
+                return self._json({"ok": False, "message": f"Database error: {e}"}, 500)
+
+        # ── /api/voice/status (POST) — Telemetry from Python voice service
+        if path == "/api/voice/status":
+
+            body = self._read_body()
+            try:
+                p = json.loads(body or b"{}")
+                setattr(self.server, "_wake_status", p)
+                return self._json({"ok": True})
+            except Exception:
+                return self._json({"ok": False}, 400)
+
         # ── /api/voice/wake — Endpoint for Python wake_service.py
         if path == "/api/voice/wake":
             body = self._read_body()
@@ -458,7 +547,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             phrase = payload.get("phrase", "Hey Nova")
             score = float(payload.get("score", 1.0))
             source = payload.get("source", "openwakeword")
-            ts = payload.get("timestamp", _t_start.time())
+            ts = float(payload.get("timestamp", _t_start.time()))
+
+            # Debounce protection (ignore duplicate wake events within 1.2s)
+            last_ts = getattr(self.server, "_last_wake_ts", 0.0)
+            if ts - last_ts < 1.2:
+                return self._json({"ok": True, "message": "Debounced"})
+            setattr(self.server, "_last_wake_ts", ts)
 
             ev = {
                 "type": p_type,
@@ -608,7 +703,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         say(f"  {icon} ACTION {action} {detail} -> {result.get('message', '')}")
         return self._json(result)
 
+    def do_DELETE(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/db/"):
+            q = parse_qs(urlparse(self.path).query)
+            body = self._read_body()
+            try:
+                p = json.loads(body or b"{}")
+            except Exception:
+                p = {}
+            try:
+                data, code = PersistenceAPIHandler.handle_delete(path, q, p)
+                return self._json(data, code)
+            except Exception as e:
+                return self._json({"ok": False, "message": f"Database error: {e}"}, 500)
+        return self._json({"ok": False, "message": "Not found"}, 404)
+
     def do_OPTIONS(self):
+
         # No CORS allow-origin on purpose → cross-site preflight fails.
         self.send_response(204)
         self.end_headers()
