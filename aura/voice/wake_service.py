@@ -16,6 +16,7 @@ LIFECYCLE:
 import argparse
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -24,7 +25,6 @@ from pathlib import Path
 
 import numpy as np
 
-# Audio capture defaults
 INPUT_RATE = 44100
 MODEL_RATE = 16000
 CHANNELS = 1
@@ -34,6 +34,8 @@ DEFAULT_THRESHOLD = 0.55
 DEFAULT_COOLDOWN_MS = 1500
 DEFAULT_SERVER_URL = "http://127.0.0.1:8000/api/voice/wake"
 DEFAULT_STATUS_URL = "http://127.0.0.1:8000/api/voice/status"
+CUSTOM_MATCH_THRESHOLD = 0.72
+CUSTOM_CAPTURE_SECONDS = 3.0
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILE = ROOT_DIR / "wake_phrases.json"
@@ -102,6 +104,59 @@ def load_config():
         return DEFAULT_CONFIG
 
 
+def normalize_text(text):
+    text = (text or "").lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def phrase_similarity(a, b):
+    a_norm = normalize_text(a)
+    b_norm = normalize_text(b)
+    if not a_norm or not b_norm:
+        return 0.0
+    if a_norm == b_norm:
+        return 1.0
+    if a_norm in b_norm:
+        return 0.95
+
+    a_words = set(a_norm.split())
+    b_words = set(b_norm.split())
+    if not a_words:
+        return 0.0
+    overlap = len(a_words.intersection(b_words))
+    return overlap / len(a_words)
+
+
+def split_phrases(config):
+    enabled_phrases = [
+        p for p in config.get("phrases", [])
+        if p.get("enabled", True)
+    ]
+    builtin_phrases = []
+    custom_phrases = []
+    for phrase in enabled_phrases:
+        if phrase.get("model"):
+            builtin_phrases.append(phrase)
+        elif phrase.get("phrase"):
+            custom_phrases.append(phrase)
+    return builtin_phrases, custom_phrases
+
+
+def find_custom_match(transcript, custom_phrases):
+    best_phrase = None
+    best_score = 0.0
+    for item in custom_phrases:
+        phrase = item.get("phrase", "")
+        score = phrase_similarity(phrase, transcript)
+        if score > best_score:
+            best_score = score
+            best_phrase = item
+    if best_phrase and best_score >= CUSTOM_MATCH_THRESHOLD:
+        return best_phrase, best_score
+    return None, best_score
+
 
 def list_audio_devices():
     """List all available input audio devices on the host."""
@@ -142,10 +197,6 @@ def list_audio_devices():
     finally:
         p.terminate()
     return devices
-
-
-def resample_to_16k(audio, source_rate=INPUT_RATE):
-    """Resample PCM audio array to 16 kHz int16."""
     if len(audio) == 0:
         return np.array([], dtype=np.int16)
     if source_rate == MODEL_RATE:
@@ -153,30 +204,34 @@ def resample_to_16k(audio, source_rate=INPUT_RATE):
 
     old_length = len(audio)
     new_length = int(old_length * MODEL_RATE / source_rate)
+    if new_length <= 0:
+        return np.array([], dtype=np.int16)
 
     old_positions = np.linspace(0, 1, old_length, endpoint=False)
     new_positions = np.linspace(0, 1, new_length, endpoint=False)
-
     converted = np.interp(new_positions, old_positions, audio)
     return np.clip(converted, -32768, 32767).astype(np.int16)
 
 
 def send_wake_event(server_url, phrase, score, source="openwakeword", transcript=""):
-    """Post wake event payload to AURA server endpoint."""
+    """Post wake event payload to the AURA server."""
     payload = {
         "type": "wake_detected",
         "phrase": phrase,
         "score": round(float(score), 4),
         "source": source,
         "transcript": transcript,
-        "timestamp": time.time()
+        "timestamp": time.time(),
     }
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         server_url,
         data=body,
-        headers={"Content-Type": "application/json", "User-Agent": "AURA-VoiceService/1.0"},
-        method="POST"
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "AURA-VoiceService/1.0",
+        },
+        method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=3.0) as resp:
@@ -315,6 +370,13 @@ class WakeWordService:
         log("WAKE", f"Listening on single mic ownership stream ({self.mic_name})...")
 
         buffer_frames = int(CHUNK * self.actual_rate / INPUT_RATE)
+        
+        # Prepare custom phrase tracking for Whisper
+        custom_audio = np.array([], dtype=np.int16)
+        custom_active = False
+        custom_motion_started = 0.0
+        max_custom_samples = int(MODEL_RATE * CUSTOM_CAPTURE_SECONDS)
+        _, custom_phrases = split_phrases(self.config)
 
         while self.running:
             try:
@@ -351,6 +413,24 @@ class WakeWordService:
                     log("WAKE", f"Wake word detected: '{p_name}' (Score: {detected_score:.4f})")
                     send_wake_event(self.server_url, p_name, detected_score, source="openwakeword")
                     self.state = VoiceServiceLifecycle.LISTENING
+                    continue
+
+                # Custom phrase detection via Whisper
+                if self.whisper_model and custom_phrases:
+                    energy = float(np.mean(np.abs(audio_16k.astype(np.float32)))) / 32768.0
+                    if energy > 0.04:
+                        custom_audio = np.concatenate((custom_audio, audio_16k)) if custom_audio.size else audio_16k
+                        custom_audio = custom_audio[-max_custom_samples:]
+                        if not custom_active:
+                            custom_active = True
+                            custom_motion_started = now
+                    elif custom_active and now - custom_motion_started >= 0.3:
+                        if custom_audio.size > int(0.4 * MODEL_RATE) and now - self.last_trigger >= self.cooldown_sec:
+                            if transcribe_custom_phrase(self.whisper_model, custom_phrases, custom_audio, self.server_url):
+                                self.last_trigger = now
+                        custom_audio = np.array([], dtype=np.int16)
+                        custom_active = False
+                        custom_motion_started = 0.0
 
             except Exception as e:
                 log("WAKE", f"Audio processing warning: {e}")
@@ -374,6 +454,36 @@ class WakeWordService:
         log("WAKE", "Microphone released. Voice Service stopped.")
 
 
+def transcribe_custom_phrase(whisper_model, custom_phrases, audio, server_url):
+    if whisper_model is None or len(audio) == 0:
+        return False
+
+    try:
+        segments, _ = whisper_model.transcribe(
+            audio.astype(np.float32),
+            language="en",
+            beam_size=1,
+            vad_filter=True,
+            condition_on_previous_text=False,
+        )
+    except Exception as e:
+        print(f"[voice_service] Whisper transcription failed: {e}")
+        return False
+
+    transcript = " ".join(segment.text.strip() for segment in segments if segment.text).strip()
+    if not transcript:
+        return False
+
+    match, score = find_custom_match(transcript, custom_phrases)
+    if not match:
+        return False
+
+    phrase_name = match.get("name", match.get("phrase"))
+    print(f"[voice_service] Custom wake phrase matched: {phrase_name} (score={score:.4f}, transcript='{transcript}')")
+    send_wake_event(server_url, phrase_name, score, source="faster-whisper", transcript=transcript)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="AURA / NOVA Production Voice Service")
     parser.add_argument("--list-devices", action="store_true", help="List all input audio devices")
@@ -392,6 +502,7 @@ def main():
             default_marker = " [DEFAULT]" if d["isDefault"] else ""
             print(f" [{d['index']:2d}] {d['name']} ({d['sampleRate']}Hz, {d['channels']}ch){default_marker}")
         return
+
 
     cfg = load_config()
     if args.device_id is not None:
