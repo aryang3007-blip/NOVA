@@ -43,11 +43,12 @@ import { applyMToon, removeMToon, setMToonLight } from '../mtoon.js';
 let THREE = null;
 let GLTFLoader = null;
 
-/** Logical bone → candidate names across VRM, Mixamo and common exports. */
+/** Logical bone → candidate names across VRM, Mixamo, Meshy and common exports. */
 const BONE_ALIASES = {
   hips:        ['hips', 'j_bip_c_hips', 'mixamorighips', 'pelvis', 'root'],
   spine:       ['spine', 'j_bip_c_spine', 'mixamorigspine'],
-  chest:       ['chest', 'upperchest', 'j_bip_c_chest', 'mixamorigspine1', 'mixamorigspine2'],
+  chest:       ['chest', 'upperchest', 'spine1', 'spine2', 'j_bip_c_chest',
+                'mixamorigspine1', 'mixamorigspine2'],
   neck:        ['neck', 'j_bip_c_neck', 'mixamorigneck'],
   head:        ['head', 'j_bip_c_head', 'mixamorighead'],
   shoulderL:   ['leftshoulder', 'j_bip_l_shoulder', 'mixamorigleftshoulder'],
@@ -77,6 +78,49 @@ const MORPHS = {
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[\s_.:-]/g, '');
 const lerp = (a, b, t) => a + (b - a) * t;
+
+/**
+ * Match a skeleton's node names onto AURA's logical bones. PURE — this is
+ * the exact mapping _mapBones() uses, so the "0 bones mapped" class of bug
+ * (Meshy exports, Blender renames) is diagnosed in a test, not in a report.
+ *
+ * Matching per logical bone:
+ *   1. exact normalized alias hit
+ *   2. alias appears INSIDE a node name ("Armature_LeftArm_03")
+ *   3. longest shared suffix wins when several nodes contain the alias
+ *
+ * @param {string[]} rawNames as traversed from the glTF scene
+ * @returns {{mapped:Record<string,string>, missing:string[], total:number}}
+ */
+export function matchBoneNames(rawNames) {
+  const byName = new Map();
+  const uniq = new Set();
+  for (const n of rawNames || []) {
+    if (!n || typeof n !== 'string') continue;
+    const key = norm(n);
+    if (key && !uniq.has(key)) { uniq.add(key); byName.set(key, n); }
+  }
+  /** @type {Record<string, string>} */
+  const mapped = {};
+  for (const [logical, aliases] of Object.entries(BONE_ALIASES)) {
+    let winner = null;
+    let bestLen = -1;
+    for (const a of aliases) {
+      const na = norm(a);
+      const exact = byName.get(na);
+      if (exact) { winner = exact; bestLen = 999; break; }
+      // Contains-match, but only for real words: "RootNode" must never map
+      // to `hips` via the short alias "root" (exact match still works).
+      if (na.length < 4 || na === 'root') continue;
+      for (const [key, raw] of byName) {
+        if (key.includes(na) && na.length > bestLen) { winner = raw; bestLen = na.length; }
+      }
+    }
+    if (winner) mapped[logical] = winner;
+  }
+  const missing = Object.keys(BONE_ALIASES).filter(k => !mapped[k]);
+  return { mapped, missing, total: Object.keys(BONE_ALIASES).length };
+}
 
 export class GLTFAvatarProvider extends AvatarProvider {
   static get id() { return 'gltf'; }
@@ -112,6 +156,16 @@ export class GLTFAvatarProvider extends AvatarProvider {
     this.modelName = options.name || 'imported model';
     /** @type {SpringBoneSystem|null} */
     this.springs = null;
+    /** Live import talkback: [{step, message, at}] — newest appended. */
+    this.importLog = [];
+    this._importDone = false;
+  }
+
+  /** Append a step to the talkback log AND push it to the UI callback. */
+  _talk(step, message) {
+    const entry = { step, message, at: Date.now() };
+    this.importLog.push(entry);
+    try { this.options.onProgress?.(entry); } catch { /* UI must never break import */ }
   }
 
   async _loadDeps() {
@@ -130,6 +184,7 @@ export class GLTFAvatarProvider extends AvatarProvider {
 
   async init() {
     try {
+      this._talk('deps', 'Loading 3D engine…');
       await this._loadDeps();
 
       const src = this.options.blob || this.options.url;
@@ -137,9 +192,13 @@ export class GLTFAvatarProvider extends AvatarProvider {
         this.failureReason = 'No model selected. Import a .vrm or .glb file first.';
         return false;
       }
+      this._talk('source', src instanceof Blob
+        ? `File: ${this.modelName} (${(src.size / 1048576).toFixed(1)} MB)`
+        : `Loading from URL: ${src}`);
 
       const w = this.container.clientWidth || 480;
       const h = this.container.clientHeight || 480;
+      this._talk('renderer', `Initialising WebGL renderer ${w}×${h}…`);
 
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -152,15 +211,29 @@ export class GLTFAvatarProvider extends AvatarProvider {
       this.camera = new THREE.PerspectiveCamera(32, w / h, 0.1, 100);
       this._lights();
 
+      this._talk('parse', 'Parsing glTF data…');
       const gltf = await this._parse(src);
       this._gltf = gltf;
       this.root = gltf.scene || gltf.scenes?.[0];
       if (!this.root) throw new Error('The file contains no scene.');
       this.scene.add(this.root);
+      let nodeCount = 0;
+      this.root.traverse(() => nodeCount++);
+      this._talk('scene', `Scene loaded: ${nodeCount} nodes (${(gltf.animations || []).length} animations)`);
 
       this._mapBones();
+      this._talk('bones', this.boneCount > 0
+        ? `Skeleton: mapped ${this.boneCount}/${this._bonePlan.total} logical bones`
+        : 'Skeleton: NO bones matched — check the rig names (details below).');
+      if (this._bonePlan?.missing?.length) {
+        this._talk('bones-missing', `Unmapped bones (skipped, rig still drives the rest): ${this._bonePlan.missing.join(', ')}`);
+      }
       this._mapMorphs();
+      this._talk('morphs', this.morphCount
+        ? `Faces: ${this.morphCount} blend-shape mesh(es) drive blink/lip-sync/emotions`
+        : 'Faces: no blend shapes — lip-sync will be body-only');
       this._frameModel();
+      this._talk('frame', `Camera framed at ${(this.modelHeight || 0).toFixed(2)} units`);
 
       // Secondary motion. Built AFTER _frameModel() so the model scale is
       // final — gravity is scale-dependent and would be wrong otherwise.
@@ -171,9 +244,13 @@ export class GLTFAvatarProvider extends AvatarProvider {
         });
         const info = this.springs.build(gltf, this.root);
         this.springInfo = info;
+        this._talk('springs', info?.count
+          ? `Physics: ${info.count} spring bones (${info.source})`
+          : 'Physics: no spring bones detected (hair/cloth stay still)');
       } catch (e) {
         console.warn('[gltf] spring bones unavailable', e);
         this.springs = null;
+        this._talk('springs', `Physics unavailable: ${e.message}`);
       }
 
       // MToon cel-shading. Only applied to actual VRM files unless forced,
@@ -184,17 +261,21 @@ export class GLTFAvatarProvider extends AvatarProvider {
         });
         if (this.mtoonInfo.applied) {
           setMToonLight(this.root, new THREE.Vector3(0.4, 0.9, 0.6));
+          this._talk('toon', `Cel-shading applied to ${this.mtoonInfo.converted} materials`);
         }
       } catch (e) {
         // Cel-shading is cosmetic — never let it stop the avatar loading.
         // The model simply keeps its original PBR materials.
         console.warn('[gltf] MToon conversion failed, keeping PBR materials', e);
         this.mtoonInfo = { converted: 0, outlines: 0, source: 'error', applied: false };
+        this._talk('toon', `Cel-shading skipped (kept original materials): ${e.message}`);
       }
 
       this._onResize = () => this.resize();
       window.addEventListener('resize', this._onResize);
       this.initialized = true;
+      this._importDone = true;
+      this._talk('done', `Import complete — ${this.modelName} is live (${this.boneCount || 0} bones mapped)`);
       return true;
     } catch (e) {
       this.failureReason = e.message || String(e);
@@ -228,30 +309,23 @@ export class GLTFAvatarProvider extends AvatarProvider {
 
   /** Find each logical bone in the imported skeleton. */
   _mapBones() {
-    /** @type {Record<string, any>} */
-    const found = {};
-    const byName = new Map();
+    // Same matcher the tests exercise (matchBoneNames) — the diagnosis and
+    // the runtime can never disagree about what maps and what does not.
+    const names = [];
     this.root.traverse((o) => {
-      if (o.isBone || o.type === 'Bone') byName.set(norm(o.name), o);
+      if (o.isBone || o.type === 'Bone') names.push(o.name);
     });
     // Some exporters use plain Object3D instead of Bone.
-    if (!byName.size) {
-      this.root.traverse((o) => byName.set(norm(o.name), o));
-    }
-    for (const [logical, aliases] of Object.entries(BONE_ALIASES)) {
-      for (const a of aliases) {
-        const hit = byName.get(norm(a));
-        if (hit) { found[logical] = hit; break; }
-      }
-      // Fall back to a contains-match ("Armature_LeftArm_03").
-      if (!found[logical]) {
-        for (const a of aliases) {
-          for (const [k, v] of byName) {
-            if (k.includes(norm(a))) { found[logical] = v; break; }
-          }
-          if (found[logical]) break;
-        }
-      }
+    if (!names.length) this.root.traverse((o) => names.push(o.name));
+
+    const plan = matchBoneNames(names);
+    this._bonePlan = plan;
+    /** @type {Record<string, any>} */
+    const found = {};
+    for (const [logical, rawName] of Object.entries(plan.mapped)) {
+      let bone = null;
+      this.root.traverse((o) => { if (!bone && (o.name === rawName)) bone = o; });
+      if (bone) found[logical] = bone;
     }
     this.bones = found;
     for (const b of Object.values(found)) this.rest.set(b, b.quaternion.clone());
@@ -442,7 +516,11 @@ export class GLTFAvatarProvider extends AvatarProvider {
           + (this.mtoonInfo?.applied
               ? ` · MToon cel-shading (${this.mtoonInfo.converted} materials)`
               : '')
+          + (this._bonePlan?.missing?.length
+              ? ` · skipped: ${this._bonePlan.missing.join(', ')}`
+              : '')
         : undefined,
+      importLog: this.importLog,
     };
   }
 

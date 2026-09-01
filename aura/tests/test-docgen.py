@@ -279,6 +279,46 @@ ok("lan_ip() returns an address or None honestly",
 ok("pair_url falls back to localhost with no LAN",
    "localhost" in devices.pair_url(8000, "1", host=None) or lan is not None)
 
+# ═══════════════════════════════════════════════════════ PPTX MEDIA
+sec("PPTX MEDIA — IMAGES REALLY GET EMBEDDED")
+if caps["pptx"]:
+    import base64
+    # 1×1 red PNG (valid, tiny).
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFBQIA"
+        "X8jx0gAAAABJRU5ErkJggg==")
+    img_path = os.path.join(OUT, "pixel.png")
+    os.makedirs(OUT, exist_ok=True)
+    with open(img_path, "wb") as fh:
+        fh.write(png)
+    r = docbuilder.build("pptx", {
+        "title": "Media deck",
+        "slides": [
+            {"title": "Hero image", "kind": "image", "image": img_path,
+             "imageCaption": "a generated pixel"},
+            {"title": "Broken", "kind": "image",
+             "image": "https://127.0.0.1:1/no-such.png"},
+            {"title": "Text", "bullets": ["still renders"]},
+        ]}, folder=OUT, resolver=R)
+    ok("media deck still builds", r["ok"], r.get("message", "")[:70])
+    names = zipfile.ZipFile(r["path"]).namelist()
+    ok("the picture is inside ppt/media/",
+       any(n.startswith("ppt/media/") for n in names), str(names[:8]))
+    ok("one image embedded, one honest failure",
+       r.get("embedded_images") == 1 and len(r.get("failed_images") or []) == 1,
+       f"embedded={r.get('embedded_images')} failed={r.get('failed_images')}")
+    ok("the failure names the slide and cause",
+       bool(__import__("re").search(r"slide \d+", (r.get("failed_images") or [""])[0]))
+       and "download" in (r.get("failed_images") or [""])[0],
+       (r.get("failed_images") or [""])[0])
+    # Pure resolver behaviour: local via jail, junk refused.
+    p, o, n = docbuilder._load_image(img_path, R)
+    ok("local path resolves through the jail resolver", o and os.path.isfile(p), n)
+    p, o, n = docbuilder._load_image("/etc/passwd", R)
+    ok("paths outside the home jail are refused", not o, n)
+    p, o, n = docbuilder._load_image("", R)
+    ok("empty source is refused, never embedded", not o, n)
+
 shutil.rmtree(OUT, ignore_errors=True)
 shutil.rmtree(D, ignore_errors=True)
 

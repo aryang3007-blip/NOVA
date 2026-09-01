@@ -44,6 +44,8 @@ export const NOVA_CAPABILITIES = {
       audience: { type: 'string', required: false, description: 'e.g. "Class 10 students", "investors"' },
       details: { type: 'string', required: false,
                  description: 'Extra instructions, e.g. "history + timeline slides", "a comparison table", "5 case studies"' },
+      images: { type: 'array', required: false,
+                description: 'image URLs or local file paths (max 3) to embed on image slides' },
     },
   },
   research_topic: {

@@ -47,6 +47,7 @@ import { worldModel } from './runtime/world-model.js';
 import { PrivacyGuard } from './vision/privacy-guard.js';
 import { Trace } from './core/trace.js';
 import { ScreenCursor } from './vision/screen-cursor.js';
+import { FOLLOWUP_WINDOW_MS, REARM_DELAY_MS, shouldRearmCommander, followupOpen } from './voice/commander.js';
 import { InteractionManager, DWELL_EV } from './vision/interaction-manager.js';
 import { TraceView } from './ui/trace-view.js';
 
@@ -642,6 +643,25 @@ class AuraApp {
       // Visible, not silent: the user should know why their "input" vanished.
       this.log(`Ignored own speech echo: “${String(text).slice(0, 48)}”`, 'warn');
     });
+    // Memory confirmations — AURA says what it remembers, honestly:
+    //  • storing a preference → immediate "I remember…" system line
+    //  • USING a remembered preference → line once the reply settles.
+    bus.on('memory:stored', ({ key, value }) => {
+      const k = String(key || '').replace(/([A-Z])/g, ' $1').toLowerCase();
+      this.pushSystemMessage(`🧠 I remember — ${k}: ${value}`);
+    });
+    bus.on('memory:recalled', ({ hits }) => {
+      this._recalledThisTurn = (hits || []).slice(0, 3);
+    });
+    bus.on(EV.AI_STREAM_END, () => {
+      const hits = this._recalledThisTurn;
+      this._recalledThisTurn = null;
+      if (hits?.length) {
+        const line = hits.map(h => `${String(h.key).replace(/([A-Z])/g, ' $1').toLowerCase()} = ${h.value}`)
+          .join(' · ');
+        this.pushSystemMessage(`🧠 I remember — ${line}`);
+      }
+    });
     bus.on(EV.STT_ERROR, ({ message, fatal, quiet }) => {
       // `quiet` = a recurring, self-healing condition (Chrome's speech service
       // dropping out). It goes to the log, not to a toast, so a bad connection
@@ -657,7 +677,11 @@ class AuraApp {
 
       const cleanCmd = (command || '').trim();
       if (cleanCmd && cleanCmd.length > 1) {
-        // Full command provided in one breath (e.g. "Hey Aura, open WhatsApp")
+        // Full command provided in one breath (e.g. "Hey Aura, open WhatsApp").
+        // Mark the turn as wake-originated so commander follow-up mode can
+        // re-arm the mic once the reply finishes (one command, no re-wake).
+        this._commanderPending = true;
+        this.setStatus('LISTENING');
         this.send(cleanCmd);
       } else {
         // Wake word only (e.g. "AURA" or "Hey Nova")
@@ -780,6 +804,9 @@ class AuraApp {
     });
     bus.on(EV.AI_STREAM_END, () => {
       $('composer-hint').textContent = `${this.ai.providerLabel}${state.get('aiModel') ? ' · ' + state.get('aiModel') : ''}`;
+      // Commander follow-up: the reply is done, offer ONE command without a
+      // re-wake (voice and UI both stay quiet while TTS is still speaking).
+      this._rearmCommander();
     });
     bus.on(EV.UI_TOAST, ({ type, text, duration }) => this.toast(type || 'info', text, duration));
     bus.on(EV.LOG, ({ text }) => this.pushEventLog(text));
@@ -1460,13 +1487,35 @@ class AuraApp {
       const f = /** @type {any} */ (e.target).files?.[0];
       if (!f) return;
       const out = $('av-import-status');
-      out.textContent = `Loading ${f.name} (${(f.size / 1048576).toFixed(1)} MB)…`;
       if (!this.avatarManager) { out.textContent = '✗ Switch to the "Full body" renderer first.'; return; }
-      const r = await this.avatarManager.importModel(f);
-      out.textContent = r.ok
-        ? `✓ ${f.name} loaded. ${(await this.avatarManager.status()).detail?.detail || ''}`
-        : `✗ ${r.reason}`;
-      if (r.ok) this.audio.sfx('confirm');
+
+      // LIVE IMPORT TALKBACK — every stage (engine, parse, skeleton mapping,
+      // morphs, springs, toon) appears here, so "0 bones mapped" shows the
+      // exact cause instead of a silent blank avatar.
+      const log = (msg, cls = '') => {
+        const div = document.createElement('div');
+        div.className = `av-import-line ${cls}`.trim();
+        div.textContent = msg;
+        out.appendChild(div);
+        out.scrollTop = out.scrollHeight;
+      };
+      out.innerHTML = '';
+      out.classList.add('av-import-log');
+
+      const onProgress = ({ step, message }) => {
+        log(`▸ ${message}`, ['error'].includes(step) ? 'err' : '');
+      };
+      log(`Importing ${f.name} (${(f.size / 1048576).toFixed(1)} MB)…`);
+
+      const r = await this.avatarManager.importModel(f, { onProgress });
+      const detail = (await this.avatarManager.status()).detail;
+      if (r.ok) {
+        log(`✓ ${f.name} loaded. ${detail?.detail || ''}`, 'ok');
+        this.audio.sfx('confirm');
+      } else {
+        log(`✗ ${r.reason}`, 'err');
+        this.audio.sfx('error');
+      }
       await this.renderAvatarManager();
     });
 
@@ -3351,6 +3400,43 @@ class AuraApp {
       if (r.mode === 'webxr') $('ar-badge').hidden = false;
     }
     return r.message;
+  }
+
+  /**
+   * Commander follow-up mode. Called when a wake-originated reply finishes:
+   * the mic re-arms for ONE follow-up command without re-waking, then reverts
+   * to wake-only scanning when the window closes. Pure decision logic lives
+   * in voice/commander.js (tested there).
+   */
+  _rearmCommander() {
+    clearTimeout(this._commanderTimer);
+    clearTimeout(this._commanderRevertTimer);
+    const ready = shouldRearmCommander({
+      wakeOriginated: this._commanderPending,
+      followupEnabled: config.get('commanderFollowup'),
+      wakeWordEnabled: config.get('wakeWordEnabled'),
+      streaming: !!state.get('aiStreaming'),
+      speaking: this.voice.output?.speaking,
+    });
+    if (!ready) { this._commanderPending = false; return; }
+
+    this._commanderTimer = setTimeout(() => {
+      if (!this._commanderPending) return;
+      this._commanderPending = false;
+      if (this.voice.input.supported && !state.get('aiStreaming') && !this.voice.output.speaking) {
+        this.voice.input.start('command');
+        this.setStatus('LISTENING');
+        this.toast('info', 'Commander follow-up — say one more command, no wake word needed.');
+        this.log('Commander follow-up window open (12s, one command)', 'ok');
+        this._commanderWindowUntil = Date.now() + FOLLOWUP_WINDOW_MS;
+        this._commanderRevertTimer = setTimeout(() => {
+          if (this.voice.input.mode === 'command'
+              && !followupOpen(Date.now(), this._commanderWindowUntil)) {
+            this.voice.input.start('wake');
+          }
+        }, FOLLOWUP_WINDOW_MS + 600);
+      }
+    }, REARM_DELAY_MS);
   }
 
   handleVoiceCommand(cmd) {

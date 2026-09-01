@@ -83,6 +83,13 @@
   <h2>Release notes</h2>
   <div id="releases"></div>
 
+  <h2>Task timeline <span class="tag" style="font-size:.6rem">every agent action</span></h2>
+  <div class="code" style="margin-bottom:.6rem">
+    Each action AURA took (semantic routes, tools, docgen, research, screen, devices)
+    is recorded as an episode. <button id="tasks-refresh" class="tag" style="cursor:pointer">↻ REFRESH</button>
+  </div>
+  <div id="tasks"><div class="rel"><div class="rel-head">Loading task timeline…</div></div></div>
+
   <div class="foot">
     Served by <code>serve.py</code> from <code>VERSION.json</code>.
     <a href="/">← back to AURA</a>
@@ -138,6 +145,67 @@ fetch('/api/version', { cache: 'no-store' })
     document.querySelectorAll('.rel-h').forEach(h =>
       h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed')));
   })
+
+  // ── TASK TIMELINE (episodic memory /api/db/memory/episodes) ──────────
+  const tasksEl = document.getElementById('tasks');
+  // source namespace → badge colour (feature/fix/safety…), matching the
+  // release-note palette already defined above.
+  const taskKind = (s) => {
+    const v = String(s || '').toLowerCase();
+    if (v.includes('screen') || v.includes('vision')) return 'safety';
+    if (v.includes('fail') || v.includes('deny') || v.includes('reject')) return 'fix';
+    if (v.includes('doc') || v.includes('pptx') || v.includes('deck')) return 'feature';
+    return 'note';
+  };
+  const taskSource = (s) => {
+    const v = String(s || '').toLowerCase();
+    return v.includes('planner') ? 'runtime · planner'
+         : v.includes('semantic') ? 'core · semantic'
+         : v.includes('screen') ? 'vision · screen'
+         : v.includes('devices') ? 'vision · devices'
+         : v === 'doc-agent' ? 'docgen · agent'
+         : v || 'aura';
+  };
+
+  function renderTasks(eps) {
+    if (!eps.length) {
+      tasksEl.innerHTML = '<div class="rel"><div class="rel-head">No agent actions recorded yet — ' +
+        'ask AURA to open an app, build a deck or research something.</div></div>';
+      return;
+    }
+    tasksEl.innerHTML = eps.map(e => `
+      <div class="rel">
+        <div class="rel-h">
+          <span class="chev">▼</span>
+          <span class="kind ${taskKind(e.source)}">${esc(taskSource(e.source)).toUpperCase()}</span>
+          <span class="rel-name">${esc(e.event || 'agent action')}</span>
+          <span class="rel-date">${esc(ts(e.at))}</span>
+        </div>
+        <div class="rel-head">${esc(taskSource(e.source))}</div>
+        <div class="rel-b"><p style="margin:.2rem 1rem 1rem">${esc(e.why || '')}</p></div>
+      </div>`).join('');
+    document.querySelectorAll('#tasks .rel-h').forEach(h =>
+      h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed')));
+  }
+  function ts(ms) {
+    const d = new Date(ms);
+    return `${
+      String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')} ${
+      String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  async function loadTasks() {
+    try {
+      const r = await fetch('/api/db/memory/episodes?limit=60', { cache: 'no-store' });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.message || 'no episodes');
+      renderTasks(d.episodes || []);
+    } catch (e) {
+      tasksEl.innerHTML = `<div class="rel"><div class="rel-head">✗ ${esc(e.message)}</div></div>`;
+    }
+  }
+  document.getElementById('tasks-refresh')?.addEventListener('click', loadTasks);
+  loadTasks();
   .catch(e => {
     document.getElementById('status').innerHTML =
       `<div class="card"><div class="k">ERROR</div><div class="v bad">${esc(e.message)}</div></div>`;

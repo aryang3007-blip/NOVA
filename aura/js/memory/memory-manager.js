@@ -222,6 +222,34 @@ export class PreferenceMemory {
   }
 
   /**
+   * Which remembered preferences does THIS message actually touch?
+   * Powers the "I remember…" confirmation: AURA only claims memory it
+   * demonstrably used (value or key appears in the message), never a
+   * broad "I remember 12 things" boast.
+   * @param {string} text
+   * @param {{minConfidence?:number}} [o]
+   * @returns {Array<{key:*, value:*, score:number, confidence:number}>}
+   */
+  relevant(text, { minConfidence = 0.5 } = {}) {
+    const q = String(text || '').toLowerCase();
+    const qWords = new Set(q.match(/[a-z0-9]{4,}/g) || []);
+    const normVal = (v) => String(v ?? '').toLowerCase()
+      .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const keyWords = (k) => String(humanKey(k)).toLowerCase()
+      .split(/\s+/).filter(w => w.length >= 4);
+    const out = [];
+    for (const p of this.all()) {
+      if ((p.confidence ?? 0) < minConfidence) continue;
+      const val = normVal(p.value);
+      const valHit = val.split(/\s+/).some(w => w.length >= 4 && qWords.has(w));
+      const keyHit = keyWords(p.key).some(w => qWords.has(w));
+      const score = valHit && keyHit ? 1 : valHit ? 0.8 : keyHit ? 0.6 : 0;
+      if (score > 0) out.push({ key: p.key, value: p.value, score, confidence: p.confidence });
+    }
+    return out.sort((a, b) => b.score - a.score);
+  }
+
+  /**
    * Natural-language digest for the system prompt. Only high-confidence
    * entries, so a guess never becomes a stated fact.
    */

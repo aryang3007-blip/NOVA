@@ -354,6 +354,141 @@ def _render_section(prs, raw, idx, total, deck, t):
     return sl
 
 
+def _load_image(src, resolver=None):
+    """
+    Resolve an image source to a real file on disk BEFORE rendering.
+    http(s) → downloaded to a temp file; local path → resolver (home jail).
+    Returns (path_or_None, ok, note).
+    """
+    s = str(src or "").strip()
+    if not s or len(s) > 400:
+        return None, False, "empty image source"
+    if s.startswith(("http://", "https://")):
+        import urllib.request
+        import tempfile
+        try:
+            req = urllib.request.Request(s, headers={"User-Agent": "NOVA/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = r.read(25 * 1024 * 1024)
+        except Exception as e:
+            return None, False, f"download failed: {e}"
+        ext = (s.split("?")[0].split(".")[-1] or "jpg").lower()
+        if ext not in ("jpg", "jpeg", "png", "gif", "webp", "bmp"):
+            ext = "jpg"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix="." + ext)
+        tmp.write(data)
+        tmp.close()
+        return tmp.name, True, "downloaded"
+    if resolver is None:
+        return None, False, "local image path but no path resolver"
+    try:
+        resolved = resolver(s)
+        # bridge._resolve_path returns (path, err); callers may also give a
+        # plain path-returning callable.
+        if isinstance(resolved, tuple):
+            path, err = resolved[0], resolved[1]
+            if err:
+                return None, False, err
+            if not path:
+                return None, False, "path refused by the resolver"
+            return str(path), True, "resolved"
+        return str(resolved), True, "resolved"
+    except Exception as e:
+        return None, False, str(e)
+
+
+def _image_px(path):
+    """
+    Read PNG/JPEG/GIF header dimensions in pure Python (no PIL dependency at
+    runtime; PIL is a test-time cross-check only). Returns (w, h) or (None, None).
+    """
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(64)
+    except Exception:
+        return None, None
+    if not head:
+        return None, None
+    try:
+        if head[:8] == b"\x89PNG\r\n\x1a\n" and head[12:16] == b"IHDR":
+            import struct as _st
+            w, h = _st.unpack(">II", head[16:24])
+            return int(w), int(h)
+        if head[:3] == b"\xff\xd8\xff":
+            # Scan JPEG segments for SOFn.
+            import struct as _st
+            i, n = 2, len(head)
+            while i < n:
+                if head[i] != 0xFF or i + 9 > n:
+                    i += 1; continue
+                marker = head[i + 1]
+                if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                              0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                    h, w = _st.unpack(">HH", head[i + 5:i + 9])
+                    return int(w), int(h)
+                seg = _st.unpack(">H", head[i + 2:i + 4])[0]
+                i += 2 + seg
+        if head[:6] in (b"GIF87a", b"GIF89a"):
+            import struct as _st
+            w, h = _st.unpack("<HH", head[6:10])
+            return int(w), int(h)
+    except Exception:
+        pass
+    return None, None
+
+
+def _render_image(prs, raw, idx, total, deck, t):
+    """'image' slides: full-bleed-ish picture + caption. No image → honest
+    placeholder text instead of silently dropping the slide."""
+    from pptx.util import Inches
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    _slide_bg(sl, t["bg"])
+    _header(sl, raw.get("title") or f"Slide {idx}", t, idx, total, deck)
+    path = raw.get("_imagePath")
+    note = raw.get("_imageNote") or "no image source supplied"
+    if not path or not os.path.exists(path):
+        _add_bullets(sl, 0.9, 1.9, 11.4, 4.4,
+                     [f"Image unavailable — {note}.",
+                      "Add an image (path or https URL) to this slide in the outline to embed it."],
+                     18, t["ink"], t["accent"])
+        _notes(sl, raw)
+        return
+    # Fit inside the content box, preserving aspect ratio. Dimensions come
+    # from our own header parser (no pptx.image module exists in python-pptx
+    # 0.6.x — importing it was the crash that made the whole deck unsavable).
+    pw, ph = _image_px(path)
+    box_w, box_h = _SLIDE_W - 1.8, 4.4
+    if pw and ph:
+        ar = pw / ph
+        if ar >= box_w / box_h:
+            w_i, h_i = box_w, box_w / ar
+        else:
+            h_i, w_i = box_h, box_h * ar
+        left = (_SLIDE_W - w_i) / 2
+        try:
+            sl.shapes.add_picture(path, Inches(left), Inches(1.62),
+                                  width=Inches(w_i), height=Inches(h_i))
+        except Exception as e:
+            _add_bullets(sl, 0.9, 1.9, 11.4, 4.4,
+                         [f"Image could not be rendered — {e}."], 18, t["ink"], t["accent"])
+            _notes(sl, raw)
+            return
+    else:
+        # Unknown format: height-only keeps the aspect ratio (no distortion).
+        sl.shapes.add_picture(path, Inches(0.9), Inches(1.62),
+                              height=Inches(box_h))
+        _add_bullets(sl, 0.9, 1.9, 11.4, 4.4,
+                     [f"Image could not be rendered — {e}."], 18, t["ink"], t["accent"])
+        _notes(sl, raw)
+        return
+    cap = raw.get("imageCaption") or raw.get("purpose") or ""
+    if cap:
+        _add_text(sl, 0.9, 6.3, _SLIDE_W - 1.8, 0.7, str(cap), size=13,
+                  color=t["dim"], align=None)
+    _notes(sl, raw)
+    return sl
+
+
 def _render_bullets(prs, raw, idx, total, deck, t):
     sl = prs.slides.add_slide(prs.slide_layouts[6])
     _slide_bg(sl, t["bg"])
@@ -530,6 +665,7 @@ def _render_references(prs, raw, idx, total, deck, t):
 _KIND_RENDERERS = {
     "section": _render_section,
     "bullets": _render_bullets,
+    "image": _render_image,
     "two-column": _render_two_column,
     "process": _render_process,
     "timeline": _render_timeline,
@@ -643,12 +779,24 @@ def build_pptx(spec, folder=None, resolver=None):
 
     total = made + len(content)
     rendered = 0
+    embedded, failed = [], []
     for offset, raw in enumerate(content):
         idx = made + offset + 1
         kind = str(raw.get("kind") or "").lower().strip()
         renderer = _KIND_RENDERERS.get(kind, _render_bullets)
+        render_raw = raw
+        if raw.get("image"):
+            # NOTE: img_* names — `path` is the OUTPUT deck path, shadowing it
+            # here made prs.save() write the deck over the image file.
+            img_path, img_ok, img_note = _load_image(raw["image"], resolver)
+            render_raw = {**raw, "_imagePath": img_path if img_ok else None,
+                          "_imageNote": img_note}
+            if img_ok:
+                embedded.append(f"slide {idx}")
+            else:
+                failed.append(f"slide {idx}: {img_note}")
         try:
-            renderer(prs, raw, idx, total, deck_title, t)
+            renderer(prs, render_raw, idx, total, deck_title, t)
         except Exception:
             # A fancy layout failing must never kill the deck: render plain.
             fb = prs.slides.add_slide(prs.slide_layouts[6])
@@ -666,8 +814,16 @@ def build_pptx(spec, folder=None, resolver=None):
 
     # Artifact verification — report honestly instead of blind success (§16).
     validation = validate_pptx(path, expected_slides=made + rendered)
+    if failed:
+        issues = list(validation.get("issues") or [])
+        issues.insert(0, f"{len(failed)} image(s) could not be embedded: {'; '.join(failed[:3])}")
+        validation["issues"] = issues
+    validation["embedded_images"] = embedded
+    validation["failed_images"] = failed
     total_slides = made + rendered
     msg = f"Created a {total_slides}-slide presentation ({theme_name}) at {path}"
+    if embedded:
+        msg += f" — {len(embedded)} image(s) embedded."
     if validation["ok"]:
         msg += " — validated: every slide has content."
     else:
@@ -676,6 +832,7 @@ def build_pptx(spec, folder=None, resolver=None):
     return {"ok": True, "path": path, "kind": "pptx",
             "slides": total_slides, "bytes": os.path.getsize(path),
             "theme": theme_name, "validation": validation,
+            "embedded_images": len(embedded), "failed_images": failed,
             "message": msg}
 
 

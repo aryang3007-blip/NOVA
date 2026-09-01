@@ -72,6 +72,7 @@ const DEFAULTS = {
   autoSendOnFinal: true,
   commanderGreeting: 'Yes, Commander?',
   commanderGreetingTone: 'questioning',
+  commanderFollowup: true,       // one command after a wake command without re-waking
 
   // ── Porcupine wake-word engine ────────────────────────────────────────
   // Get a free access key at https://console.picovoice.ai/

@@ -283,7 +283,8 @@ def run():
                     if panel == "vision":
                         pg.evaluate(REVEAL_VISION)
                     pg.wait_for_timeout(260)
-                    scan(pg, f"{name} \u00b7 {panel}{' \u00b7 TRACE RUNNING' if trace_on else ''}", total)
+                    suffix = ' \u00b7 TRACE RUNNING' if trace_on else ''
+                    scan(pg, f"{name} \u00b7 {panel}{suffix}", total)
                     if SHOT and trace_on and panel in ("vision", "ops"):
                         pg.screenshot(path=str(out / f"{name}-{panel}-trace.png"))
             if errs:

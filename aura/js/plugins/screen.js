@@ -329,7 +329,7 @@ export function registerScreenPlugin(registry, ctx) {
             return 'Usage: `/doc ppt on quantum computing` · `/doc sheet of my monthly budget` '
               + '· `/doc report on climate policy`';
           }
-          const { detectDocRequest, outline, describeSpec, DOC_KINDS } =
+          const { detectDocRequest, extractImageSources, outline, describeSpec, DOC_KINDS } =
             await import('../ai/doc-agent.js');
           // "/doc ppt on X" has no verb, so give the detector one.
           const req = detectDocRequest(`make ${text}`) || detectDocRequest(text);
@@ -347,6 +347,7 @@ export function registerScreenPlugin(registry, ctx) {
             kind: req.kind, topic: req.topic, ai: c.ai,
             slides: req.slides || 0, audience: req.audience || '',
             details: req.details || '',
+            imageSources: extractImageSources(`${req.details || ''} ${text}`),
             // §15: research first, but only when the topic needs current facts.
             research: async (t) => {
               try {
@@ -362,6 +363,8 @@ export function registerScreenPlugin(registry, ctx) {
           const notes = [];
           if (o.researched) notes.push('grounded in live web research');
           if (o.deckReport?.repaired) notes.push('weak slides were auto-repaired by the model');
+          if ((o.imagesPlaced || 0) > 0 && r.embedded_images > 0) notes.push(`${r.embedded_images} image(s) embedded`);
+          if (r.failed_images?.length) notes.push(`could not embed: ${r.failed_images.slice(0, 2).join('; ')}`);
           if (r.validation && !r.validation.ok) notes.push(`validation: ${r.validation.issues.slice(0, 2).join('; ')}`);
           const src = o.source === 'offline-template'
             ? '\n\n_Built from AURA\'s offline template — no model was available._'

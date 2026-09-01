@@ -160,6 +160,59 @@ export function detectDocRequest(text) {
 }
 
 /**
+ * Pull image sources out of a request. Pure — "create ppt on Mars with
+ * /home/user/mars.png: climate, moons" must end up with the picture embedded,
+ * not mentioned in a caption. Only real sources survive: http(s) URLs with an
+ * image extension, or local paths ending in an image extension.
+ * @param {string} text
+ * @returns {string[]} max 3
+ */
+export function extractImageSources(text) {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const out = [];
+  const seen = new Set();
+  const URL_RX = /https?:\/\/[^\s"'<>)]+\.(?:png|jpe?g|gif|webp|bmp)(?:\?[^\s"'<>)]*)?/gi;
+  const PATH_RX = /(?<![:/\w])(?:~\/|\/|\.{1,2}\/|\.\.\/|[A-Za-z]:\\|[A-Za-z]:\/)[^\s,;:"']+\.(?:png|jpe?g|gif|webp|bmp)(?![\w])/gi;
+  for (const rx of [URL_RX, PATH_RX]) {
+    let m;
+    while ((m = rx.exec(t)) && out.length < 3) {
+      const src = m[0].replace(/[.,;:]+$/, '').trim();
+      const key = src.toLowerCase();
+      if (src.length > 8 && !seen.has(key)) { seen.add(key); out.push(src); }
+    }
+  }
+  return out;
+}
+
+/**
+ * Attach resolved image sources to a validated deck: an existing `image`
+ * slide gets its picture, otherwise dedicated image slides are appended
+ * (max 3). Returns the new spec + how many sources were placed.
+ */
+export function attachImages(spec, sources) {
+  const list = (sources || []).slice(0, 3);
+  if (!list.length || !spec || !Array.isArray(spec.slides)) return { spec, placed: 0 };
+  const slides = spec.slides.map(s => ({ ...s }));
+  let placed = 0;
+  // 1) fill image slides the model already made
+  for (const s of slides) {
+    if (placed >= list.length) break;
+    if ((s.kind === 'image' || s.kind === 'media') && !s.image) {
+      s.image = list[placed]; placed++;
+    }
+  }
+  // 2) anything left becomes a dedicated visual slide after the hero/section
+  for (let i = placed; i < list.length; i++) {
+    const at = Math.min(1, slides.length);
+    slides.splice(at, 0, { kind: 'image', title: 'Visual', image: list[i],
+                            purpose: 'Image attached from request' });
+    placed++;
+  }
+  return { spec: { ...spec, slides }, placed };
+}
+
+/**
  * Does this topic need live research first? (spec §15) Static/general topics
  * must NOT trigger a search — quantum computing basics are knowable; "today's
  * AI news" is not.
@@ -201,7 +254,8 @@ const SYS = (kind, { slides = 0, audience = '' } = {}) => {
  *          raw?:string, deckReport?:object, researched?:boolean}>}
  */
 export async function outline({ kind, topic, ai = null, engine = null, slides = 0,
-                                audience = '', details = '', research = null, streamFn = null,
+                                audience = '', details = '', imageSources = [],
+                                research = null, streamFn = null,
                                 timeoutMs = 90000 }) {
   if (!DOC_KINDS[kind]) return { ok: false, source: 'none', message: `Unknown type '${kind}'.` };
   const eng = engine || ai;
@@ -251,9 +305,14 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
     maxTokens: kind === 'pptx' ? 4096 : 2048, timeoutMs, retries: 1,
   });
 
+  const attach = (s) => {
+    if (kind !== 'pptx') return s;
+    const a = attachImages(s, imageSources);
+    return a.placed ? a.spec : s;
+  };
   if (!r.ok || !r.json) {
     return {
-      ok: true, spec: outlineFallback(kind, topic), source: 'offline-template',
+      ok: true, spec: attach(outlineFallback(kind, topic)), source: 'offline-template',
       raw: (r.raw || '').slice(0, 400),
       message: (r.message || 'The model did not return a usable outline')
         + ' — built a skeleton instead.' + guidance,
@@ -263,7 +322,7 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
   let spec = validateSpec(kind, r.json, topic);
   if (!spec) {
     return {
-      ok: true, spec: outlineFallback(kind, topic), source: 'offline-template',
+      ok: true, spec: attach(outlineFallback(kind, topic)), source: 'offline-template',
       raw: (r.raw || '').slice(0, 400),
       message: 'The model outline was unusable, so AURA built a skeleton you can edit.' + guidance,
     };
@@ -281,10 +340,14 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
         deckReport.repaired = true;
       }
     }
+    // ── media: user-supplied images (paths/URLs from details) get embedded
+    const attached = attachImages(spec, imageSources);
+    if (attached.placed) spec = attached.spec;
   }
 
   return { ok: true, spec, source: `${r.via === 'selected' ? '' : 'fallback:'}${r.provider}`,
-           model: r.model, deckReport, researched };
+           model: r.model, deckReport, researched,
+           imagesPlaced: kind === 'pptx' ? (imageSources || []).slice(0, 3).length : 0 };
 }
 
 /** Regex-free proxy for "does this slide carry real content". */
@@ -411,6 +474,8 @@ export function validateSpec(kind, obj, topic = '') {
                    bullets: arr(s.columns.right?.bullets).map(b => str(b, 300)).filter(Boolean).slice(0, 8) },
         };
       }
+      if (s.image) out.image = str(s.image, 400);
+      if (s.imageCaption) out.imageCaption = str(s.imageCaption, 200);
       if (s.steps) out.steps = arr(s.steps).map(x => str(x, 300)).filter(Boolean).slice(0, 8);
       if (s.timeline) out.timeline = arr(s.timeline)
         .map(t => ({ label: str(t?.label, 60), text: str(t?.text ?? t, 300) }))
@@ -556,5 +621,6 @@ export function describeSpec(kind, spec) {
   return `${s.length} sections — ${s.map(x => x.heading).filter(Boolean).slice(0, 4).join(', ')}`;
 }
 
-export default { detectDocRequest, outline, validateSpec, validateDeck, repairDeck,
+export default { detectDocRequest, extractImageSources, attachImages,
+                 outline, validateSpec, validateDeck, repairDeck,
                  outlineFallback, describeSpec, needsResearch, DOC_KINDS };

@@ -293,6 +293,9 @@ export class AIEngine {
       try {
         this.memoryManager.conversation.addUser(input);
         this._memoryContext = await this.memoryManager.buildContext(input);
+        // "I remember…" hook: only prefs this message demonstrably uses.
+        const hits = this.memoryManager.preferences?.relevant?.(input) || [];
+        if (hits.length) bus.emit('memory:recalled', { hits });
       } catch (e) { console.warn('[memory] context build failed', e); }
     }
 
@@ -398,6 +401,12 @@ export class AIEngine {
       }, input);
     } else if (sel.call.service || sel.call.tool === 'device_action') {
       res = await this._runNovaService(sel.call, input);
+      try {
+        await this.memoryManager?.episodic?.record(
+          `${sel.call.tool || sel.call.service}: ${String(res?.message || res?.summary || '').slice(0, 140)}`,
+          { why: `nova service "semantic" → ${res?.success !== false ? 'completed' : 'failed'}`,
+            source: `${sel.call.service || 'nova-service'}` });
+      } catch { /* observability must never break the action */ }
     } else {
       res = await this.executeToolCall(sel.call, 'semantic');
     }
@@ -438,16 +447,21 @@ export class AIEngine {
         if (!caps?.[kind]) {
           return { success: false, message: `${kind} generation needs its Python library (${caps?.install?.[kind] || 'see requirements.txt'}).` };
         }
-        // "create ppt on X with: history + timeline" → details reach the model.
+        // "create ppt on X with: history + timeline" → details reach the model,
+        // and any image path/URL in the request gets embedded on image slides.
         let details = String(p.details || '');
+        const srcText = `${details} ${rawInput}`;
         if (!details) {
           const d = docAgent.detectDocRequest(String(rawInput || ''));
           details = d?.details || '';
         }
+        const imageSources = Array.isArray(p.images) && p.images.length
+          ? p.images.slice(0, 3).map(String)
+          : docAgent.extractImageSources(srcText);
         const o = await docAgent.outline({
           kind, topic: String(p.topic || rawInput), engine: this,
           slides: Number(p.slides) || 0, audience: String(p.audience || ''),
-          details, research: (t) => this._researchDigest(t),
+          details, imageSources, research: (t) => this._researchDigest(t),
         });
         if (!o.ok) return { success: false, message: o.message || 'Outline failed.' };
         const r = await A.docBuild(kind, o.spec, config.get('docFolder') || undefined);
@@ -463,6 +477,8 @@ export class AIEngine {
         }
         if (o.researched) extras.push('grounded in live web research');
         if (o.deckReport && !o.deckReport.ok && o.deckReport.repaired) extras.push('weak slides were auto-repaired');
+        if ((o.imagesPlaced || 0) > 0 && r.embedded_images > 0) extras.push(`${r.embedded_images} image(s) embedded on image slides`);
+        if (r.failed_images?.length) extras.push(`could not embed: ${r.failed_images.slice(0, 2).join('; ')}`);
         if (r.validation && !r.validation.ok) extras.push(`validation notes: ${r.validation.issues.slice(0, 2).join('; ')}`);
         return { success: true,
                  message: `Created ${docAgent.describeSpec(kind, o.spec)} → \`${r.path}\``
@@ -609,6 +625,7 @@ export class AIEngine {
         case 'memory_store': {
           if (!this.memoryManager) return { success: false, tool: spec.name, message: 'Memory manager unavailable.', error: 'not_available' };
           await this.memoryManager.preferences.set(p.key, p.value, { source: 'ai', confidence: 0.9 });
+          bus.emit('memory:stored', { key: p.key, value: p.value, confidence: 0.9 });
           return { success: true, tool: spec.name, message: `Remembered ${p.key}: ${p.value}` };
         }
         default:

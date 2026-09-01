@@ -112,8 +112,12 @@ export class AvatarManager {
     return { ok: true, provider: id };
   }
 
-  /** Import a local .glb/.vrm file and switch to it. */
-  async importModel(file) {
+  /**
+   * Import a local .glb/.vrm file and switch to it.
+   * @param {File} file
+   * @param {{onProgress?:Function}} [opts] receives {step, message} per stage
+   */
+  async importModel(file, { onProgress = null } = {}) {
     if (!file) return { ok: false, reason: 'No file given.' };
     const name = file.name || 'model';
     if (!/\.(glb|gltf|vrm)$/i.test(name)) {
@@ -125,8 +129,14 @@ export class AvatarManager {
     }
     this._importedBlob = file;
     config.set({ avatarModelName: name });
-    const r = await this.use('gltf', { blob: file, name });
-    if (!r.ok) this._importedBlob = null;
+    onProgress?.({ step: 'start', message: `Importing ${name}…` });
+    const r = await this.use('gltf', { blob: file, name, onProgress });
+    if (!r.ok) {
+      this._importedBlob = null;
+      onProgress?.({ step: 'error', message: `✗ ${r.reason}` });
+    }
+    // Keep the talkback reachable after the provider swap (e.g. settings UI).
+    this.lastImportLog = /** @type {any} */ (this.provider)?.importLog || [];
     return r;
   }
 

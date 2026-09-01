@@ -8,7 +8,8 @@ for t in test-architecture test-core test-providers test-actions \
          test-live test-desktop test-router test-models test-voice-loop \
          test-gesture-wave test-desktop-tools test-vision-embeddings test-screen-agent \
          test-gestures-cursor test-task-agent test-runtime test-privacy-guard test-dwell \
-         test-doc-agent test-doc-resilience test-sphere; do
+         test-doc-agent test-doc-resilience test-sphere \
+         test-commander test-memory-recall test-avatar-import; do
   printf "  %-20s " "$t"
   node "tests/$t.mjs" | grep -oE "PASS [0-9]+" | tail -1
 done

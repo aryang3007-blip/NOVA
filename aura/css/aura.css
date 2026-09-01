@@ -890,6 +890,12 @@ html.reduce-motion .ccr-core, html.reduce-motion .cc-live-dot { animation: none 
 
 /* ═══════════ AVATAR MANAGER ═══════════ */
 .av-providers { display: flex; flex-direction: column; gap: .5rem; }
+/* live import talkback (avatar-provider/gltf) */
+.av-import-log { max-height: 180px; overflow-y: auto; font-family: var(--mono);
+  font-size: .62rem; line-height: 1.6; white-space: pre-wrap; }
+.av-import-line { color: var(--text-dim); }
+.av-import-line.ok { color: var(--ok); }
+.av-import-line.err { color: var(--danger); }
 .av-provider { display: flex; align-items: center; gap: .75rem;
   padding: .7rem .8rem; border: 1px solid var(--hair); border-radius: 10px;
   background: rgba(255,255,255,.02); transition: .18s; }

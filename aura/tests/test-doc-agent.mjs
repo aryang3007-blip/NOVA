@@ -6,7 +6,8 @@
  *
  *   node tests/test-doc-agent.mjs
  */
-import { detectDocRequest, validateSpec, outlineFallback, describeSpec, DOC_KINDS }
+import { detectDocRequest, validateSpec, outlineFallback, describeSpec, DOC_KINDS,
+         extractImageSources, attachImages }
   from '../js/ai/doc-agent.js';
 
 let P = 0, F = 0;
@@ -190,6 +191,59 @@ for (const k of ['pptx', 'xlsx', 'docx']) {
   ok(`${k} has an extension`, DOC_KINDS[k].ext === `.${k}`);
   ok(`${k} documents its schema to the model`, DOC_KINDS[k].schema.includes('{'));
   ok(`${k} gives the model rules`, DOC_KINDS[k].rules.length > 20);
+}
+
+/* ─────────────────────────────────────────────────────────── */
+S('IMAGE SOURCES — extractImageSources (urls + local paths, max 3)');
+{
+  const urls = extractImageSources(
+    'make a ppt on mars with https://example.com/mars.png and https://a.io/photo.jpg?x=1 okay');
+  ok('finds two http image urls', urls.length === 2, JSON.stringify(urls));
+  ok('strips trailing punctuation', /https:\/\/example\.com\/mars\.png$/.test(urls[0] || ''), urls[0]);
+
+  const local = extractImageSources(
+    'deck about food, use /home/user/food.jpg and ./assets/chart.webp');
+  ok('finds absolute + relative local paths', local.length === 2, JSON.stringify(local));
+  ok('keeps the extension', local.every(s => /\.(jpe?g|webp|png)$/.test(s)));
+
+  const mixed = extractImageSources(
+    'use https://x.io/a.png and /tmp/b.gif and C:\\imgs\\c.bmp now',
+  );
+  ok('max 3 sources', mixed.length === 3, JSON.stringify(mixed));
+
+  ok('no image extension → nothing', extractImageSources('open https://youtube.com/watch?v=1').length === 0);
+  ok('empty input → []', extractImageSources('  ').length === 0);
+}
+
+/* ─────────────────────────────────────────────────────────── */
+S('IMAGE SOURCES — attachImages fills and appends, keeps spec intact');
+{
+  const deck = { title: 'T', slides: [
+    { kind: 'title', title: 'Cover' },
+    { kind: 'image', title: 'Model image' },       // no image → gets one
+    { kind: 'bullets', title: 'Body', bullets: ['a', 'b'] },
+  ] };
+
+  const one = attachImages(deck, ['https://x.io/one.png']);
+  ok('existing image slide filled in place', one.placed === 1
+     && one.spec.slides[1].image === 'https://x.io/one.png', JSON.stringify(one.spec.slides[1]));
+
+  const two = attachImages(deck, ['https://x.io/one.png', 'https://x.io/two.png']);
+  ok('first fills model slide, second joins right after the hero slide',
+     two.placed === 2 && two.spec.slides[1].kind === 'image'
+     && two.spec.slides[1].image === 'https://x.io/two.png'
+     && two.spec.slides[2].image === 'https://x.io/one.png',
+     JSON.stringify(two.spec.slides.map(s => `${s.kind}:${s.image || ''}`)));
+
+  const over = attachImages(deck, ['a.png', 'b.png', 'c.png', 'd.png']);
+  ok('never embeds more than 3', over.placed === 3
+     && over.spec.slides.filter(s => s.kind === 'image').length === 3);
+
+  const none = attachImages(deck, []);
+  ok('no sources → untouched spec', none.placed === 0 && none.spec === deck);
+
+  const nope = attachImages({ title: 'T' }, ['https://x.io/a.png']);
+  ok('non-deck spec → safe no-op', nope.placed === 0);
 }
 
 console.log(`\n  \x1b[32mPASS ${P}\x1b[0m  FAIL ${F}`);
