@@ -490,7 +490,7 @@ export const ollama = {
    *   `data:image/...;base64,` prefix is stripped automatically — Ollama
    *   wants the raw base64.
    */
-  async *stream({ messages, model, signal, temperature = 0.7, baseUrlOverride, images }) {
+  async *stream({ messages, model, signal, temperature = 0.7, maxTokens = 2048, baseUrlOverride, images }) {
     const viaProxy = await this._proxyUp();
 
     // Verify the model against the REAL installed list before sending it.
@@ -541,7 +541,15 @@ export const ollama = {
       res = await fetch(url, {
         method: 'POST', signal,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: chosen, messages: payloadMessages, stream: true, options: { temperature } }),
+        body: JSON.stringify({
+          model: chosen, messages: payloadMessages, stream: true,
+          // num_predict MUST be explicit. Ollama's default output cap is much
+          // smaller than a full deck JSON (8–12 slides with notes), so the
+          // response was chopped mid-brace and extractJson() reported a
+          // meaningless parse failure. With an explicit cap the stream is
+          // bounded by what the caller actually needs.
+          options: { temperature, num_predict: maxTokens },
+        }),
       });
     } catch (e) {
       if (e.name === 'AbortError') throw e;

@@ -42,6 +42,8 @@ export const NOVA_CAPABILITIES = {
       topic: { type: 'string', required: true, description: 'What the document is about' },
       slides: { type: 'number', required: false, description: 'Requested slide count (presentations)' },
       audience: { type: 'string', required: false, description: 'e.g. "Class 10 students", "investors"' },
+      details: { type: 'string', required: false,
+                 description: 'Extra instructions, e.g. "history + timeline slides", "a comparison table", "5 case studies"' },
     },
   },
   research_topic: {

@@ -346,6 +346,7 @@ export function registerScreenPlugin(registry, ctx) {
           const o = await outline({
             kind: req.kind, topic: req.topic, ai: c.ai,
             slides: req.slides || 0, audience: req.audience || '',
+            details: req.details || '',
             // §15: research first, but only when the topic needs current facts.
             research: async (t) => {
               try {
@@ -364,7 +365,9 @@ export function registerScreenPlugin(registry, ctx) {
           if (r.validation && !r.validation.ok) notes.push(`validation: ${r.validation.issues.slice(0, 2).join('; ')}`);
           const src = o.source === 'offline-template'
             ? '\n\n_Built from AURA\'s offline template — no model was available._'
-            : `\n\n_Outlined by ${o.source}${o.model ? ` (${o.model})` : ''}._`
+            : `\n\n_Outlined by ${o.source}${o.model ? ` (${o.model})` : ''}`
+              + (o.source.startsWith('fallback:') ? ' — selected backend was unusable, so this one ran.' : '')
+              + '._`
               + (notes.length ? `\n\n_${notes.join('. ')}._` : '');
           return `${DOC_KINDS[req.kind].icon} **${DOC_KINDS[req.kind].label} created**\n\n`
             + `${describeSpec(req.kind, o.spec)}\n\n`

@@ -13,7 +13,8 @@
  *
  * Fallbacks are honest: a task only degrades when the selected backend is
  * genuinely unusable (no key, provider down, hard error), and the caller is
- * told which backend actually ran.
+ * told which backend actually ran. `candidateTargets()` exposes the full
+ * escalation ladder so callers can TRY the next one when the first fails.
  *
  * @module ai/router
  */
@@ -37,7 +38,10 @@ export const TASK = {
 };
 
 /** Providers tried (in order) when the selection itself is unusable. */
-const FALLBACK_ORDER = ['gemini', 'openrouter', 'openai', 'groq', 'anthropic'];
+export const FALLBACK_ORDER = ['gemini', 'openrouter', 'openai', 'groq', 'anthropic'];
+
+/** How many candidates to hand back before we stop escalating. */
+export const MAX_CANDIDATES = 3;
 
 function keyReady(p, cfg) {
   return p && (!p.needsKey || cfg.getKey(p.id));
@@ -73,42 +77,132 @@ export function resolveChat(engine = null) {
 }
 
 /**
- * Concrete runnable target for a task. Returned by every complete* call so
- * features can SAY which backend actually did the work.
- * @returns {{id:string, p:object, model:string, key:string|undefined, via:string}|null}
+ * Concrete runnable targets in ESCALATION ORDER, ready to hand to a
+ * provider's stream. max 3 — beyond that the user's machine is not going to
+ * get better, it is going to get slower.
+ *
+ * Ordering rule: the UI selection leads when it is usable; otherwise the
+ * API providers run first (Gemini > OpenRouter > OpenAI > Groq > Anthropic,
+ * cost/latency priority) and Ollama — a second machine that may not even be
+ * running — is the LAST resort, never the silent default.
+ *
+ * @param {any} [engine] live AIEngine for its resolved pair
+ * @param {{modelOverride?:string}} [opts]
+ * @returns {Array<{id:string, p:object, model:string, key:string|undefined, via:string}>}
  */
-function pickTarget(engine, { modelOverride = '' } = {}) {
+export function candidateTargets(engine = null, { modelOverride = '' } = {}) {
   const sel = resolveChat(engine);
-  const tryProvider = (id, via, model) => {
+  const make = (id, via, model) => {
     const p = getProvider(id);
-    if (!p || p.id === 'ollama') return null;
+    if (!p) return null;
+    if (p.id === 'ollama') {
+      return { id: p.id, p, model: modelOverride || model || '', key: undefined, via };
+    }
     if (p.needsKey && !config.getKey(p.id)) return null;
-    return { id: p.id, p, model: modelOverride || model || p.defaultModel || '',
-             key: p.needsKey ? config.getKey(p.id) : undefined, via };
+    return { id: p.id, p, model: modelOverride || model || p.defaultModel || '', key: config.getKey(p.id), via };
+  };
+  const push = (out, id, via, model) => {
+    const t = make(id, via, model);
+    if (t) out.push(t);
   };
 
+  const out = [];
   if (sel.provider && sel.provider !== 'local' && sel.provider !== 'ollama') {
-    const t = tryProvider(sel.provider, 'selected', sel.model);
-    if (t) return t;
+    push(out, sel.provider, 'selected', sel.model);
+    for (const id of FALLBACK_ORDER) if (id !== sel.provider) push(out, id, 'fallback', '');
+  } else if (sel.provider === 'ollama') {
+    // UI pinned local Ollama — it leads, then the API ladder.
+    push(out, 'ollama', 'selected', sel.model);
+    for (const id of FALLBACK_ORDER) push(out, id, 'fallback', '');
+  } else {
+    // 'local' / nothing usable: API ladder first, Ollama dead last.
+    for (const id of FALLBACK_ORDER) push(out, id, 'fallback', '');
+    push(out, 'ollama', 'fallback-local', '');
   }
-  if (sel.provider === 'ollama') {
-    return { id: 'ollama', p: ollama, model: modelOverride || sel.model || ollama.defaultModel || '',
-             key: undefined, via: 'selected' };
+  return out.slice(0, MAX_CANDIDATES);
+}
+
+/**
+ * The ONE backend that will run a request right now. Same ladder as
+ * candidateTargets(). `ok:false` only when NOTHING can run; otherwise the
+ * caller gets an honest `reason` when the only hope is local Ollama with no
+ * API key (it may be down — the caller should say so).
+ *
+ * @returns {{ok:boolean, provider:string, model:string, via:string,
+ *            unverified?:boolean, reason?:string}}
+ */
+export function usableBackend(engine = null, { modelOverride = '' } = {}) {
+  const c = candidateTargets(engine, { modelOverride });
+  if (!c.length) {
+    const sel = resolveChat(engine);
+    return {
+      ok: false,
+      provider: sel.provider || 'none',
+      model: '',
+      via: sel.provider === 'ollama' ? 'selected' : 'none',
+      reason: 'No AI backend is usable: no API key is set and no local model was found. '
+        + 'Set a key in Settings → AI Core, or start Ollama ("ollama serve") and pull a model.',
+    };
   }
-  // Selection unusable (usually 'local' = no keys at all): honest degrade,
-  // marked as fallback so the caller may disclose it.
-  for (const id of FALLBACK_ORDER) {
-    const t = tryProvider(id, 'fallback', '');
-    if (t) return t;
+  const first = c[0];
+  const noApiKey = !FALLBACK_ORDER.some(id => keyReady(getProvider(id), config));
+  if (first.id === 'ollama' && noApiKey) {
+    return {
+      ok: true, provider: first.id, model: first.model, via: first.via,
+      unverified: true,
+      reason: 'No API key is configured — the only candidate is local Ollama. '
+        + 'If Ollama is not running, generation will not work. '
+        + 'Add a key in Settings → AI Core, or start Ollama ("ollama serve").',
+    };
   }
-  return { id: 'ollama', p: ollama, model: modelOverride || ollama.defaultModel || '',
-           key: undefined, via: 'fallback-local' };
+  return { ok: true, provider: first.id, model: first.model, via: first.via };
+}
+
+/**
+ * WHY did the JSON come back unusable? Real cause, never the banned generic
+ * "Model returned no usable JSON." — that phrase hid the actual bug (Ollama
+ * truncating the stream mid-brace) for weeks.
+ *
+ * @param {{provider?:string, model?:string, raw?:string, message?:string}} info
+ * @returns {string} a message that names the true cause
+ */
+export function describeJsonFailure({ provider = 'model', model = '', raw = '', message = '' } = {}) {
+  const who = `${provider}${model ? ` (${model})` : ''}`;
+  if (message && !/no usable json/i.test(message)) return message; // real error already
+  const text = String(raw || '');
+  if (!text.trim()) {
+    return `${who} returned an empty response — no text at all. The request may have been blocked or timed out.`;
+  }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end >= 0) {
+    const pre = text.slice(0, start).trim();
+    const post = text.slice(end + 1).trim();
+    if (pre || post) {
+      return `${who} wrapped the JSON in extra text (${pre ? pre.length : 0} chars before, `
+        + `${post ? post.length : 0} after). Asked for a bare JSON object and got prose around it.`;
+    }
+    return `${who} returned JSON that parsed, but did not match the shape the task requested.`;
+  }
+  if (start >= 0 && end < 0) {
+    // The exact truncation signature: an opening brace that never closes.
+    const tail = text.slice(-40).replace(/\s+/g, ' ');
+    return `${who} TRUNCATED the JSON mid-stream — got ${text.length} chars, the object never closes `
+      + `(last text: “${tail}…”). Usually the model hit its output cap; a shorter deck or larger `
+      + `num_predict fixes it. Retrying on the next candidate backend…`;
+  }
+  return `${who} replied with prose instead of the requested JSON `
+    + `(first 60 chars: “${text.slice(0, 60).replace(/\s+/g, ' ')}…”). The system prompt asked for a bare object.`;
 }
 
 /**
  * Non-streaming completion that RESPECTS THE UI SELECTION. Used by tool
  * selection and document generation — anywhere code used to call a model
  * directly (and usually hardcode Ollama) behind the user's back.
+ *
+ * Escalates: if the first candidate hard-fails (network, auth, 5xx), the
+ * next one in `candidateTargets()` order is tried, up to MAX_CANDIDATES.
+ * callers see exactly which one actually ran via `via`.
  *
  * @param {object} o
  * @param {Array<{role:string, content:string}>} o.messages
@@ -122,28 +216,40 @@ function pickTarget(engine, { modelOverride = '' } = {}) {
  */
 export async function complete({ messages, engine = null, temperature = 0.4,
                                  maxTokens = 2048, timeoutMs = 90000, streamFn = null }) {
-  const target = pickTarget(engine);
-  const stream = streamFn || target.p.stream.bind(target.p);
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
-  let text = '';
-  try {
-    for await (const d of stream({
-      messages, model: target.model, key: target.key,
-      temperature, maxTokens, signal: ctl.signal,
-    })) text += d;
-  } catch (e) {
-    clearTimeout(timer);
-    return { ok: false, text: '', provider: target.id, model: target.model, via: target.via,
-             message: `${target.id} failed: ${e?.message || e}` };
+  const targets = candidateTargets(engine, { modelOverride: '' });
+  if (!targets.length) {
+    const u = usableBackend(engine);
+    return { ok: false, text: '', provider: 'none', model: '', via: 'none', message: u.reason };
   }
-  clearTimeout(timer);
-  return { ok: true, text: text.trim(), provider: target.id, model: target.model, via: target.via };
+  let lastErr = null;
+  for (const target of targets) {
+    const stream = streamFn || target.p.stream.bind(target.p);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    let text = '';
+    try {
+      for await (const d of stream({
+        messages, model: target.model, key: target.key,
+        temperature, maxTokens, signal: ctl.signal,
+      })) text += d;
+      clearTimeout(timer);
+      if (text) {
+        return { ok: true, text: text.trim(), provider: target.id, model: target.model, via: target.via };
+      }
+      lastErr = { message: `${target.id} returned an empty stream.` };
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = { message: `${target.id} failed: ${e?.message || e}` };
+    }
+  }
+  return { ok: false, text: '', provider: targets[0].id, model: targets[0].model,
+           via: targets[0].via, message: lastErr?.message || 'All candidate backends failed.' };
 }
 
 /**
  * complete() + lenient JSON extraction (repairs the malformations real
- * models produce). One automatic repair retry on empty parse.
+ * models produce). One automatic repair retry on empty parse. Failures are
+ * described by describeJsonFailure — the true cause, never a generic phrase.
  *
  * @returns {Promise<{ok:boolean, json:any, provider:string, model:string,
  *          via:string, raw:string, message?:string}>}
@@ -161,7 +267,10 @@ export async function completeJSON({ messages, engine = null, temperature = 0.2,
   }
   return { ok: false, json: null, provider: last?.provider || 'unknown', model: last?.model || '',
            via: last?.via || '', raw: last?.text || '',
-           message: last?.message || 'Model returned no usable JSON.' };
+           message: describeJsonFailure({
+             provider: last?.provider, model: last?.model, raw: last?.text, message: last?.message,
+           }) };
 }
 
-export default { TASK, resolveChat, complete, completeJSON };
+export default { TASK, resolveChat, complete, completeJSON, candidateTargets,
+                 usableBackend, describeJsonFailure, FALLBACK_ORDER, MAX_CANDIDATES };

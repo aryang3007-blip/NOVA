@@ -39,6 +39,7 @@
  */
 
 import * as router from './router.js';
+import { config } from '../core/config.js';
 
 /** Document kinds and how to ask a model for each. */
 export const DOC_KINDS = {
@@ -90,20 +91,44 @@ const TRIGGERS = [
   [/\b(docx|word\s*doc|word\s*document|write\s*(?:me\s*)?an?\s*(?:report|essay|doc)|report|essay|letter)\b/i, 'docx'],
 ];
 
+/** Extra-instruction clauses, e.g. "…with: history + timeline" or "…must include a comparison". */
+const DETAIL_PATTERNS = [
+  /,\s*(?:with|including|covering|mentioning)\s+([^.!?\n]+)$/i,
+  /\b(?:with|including)\s*:\s*([^.!?\n]+)$/i,
+  /\bmust\s+(?:include|cover|have|contain|mention)\s+([^.!?\n]+)$/i,
+  /\binclud(?:e|es|ing)\s+([^.!?\n]+)$/i,
+];
+
 /**
  * Does this message ask for a document? Pure, so it unit-tests trivially.
+ * Also extracts extra-instructions ("with: …", "must include …") so the
+ * model can honour them instead of the user restating them in chat.
  * @param {string} text
- * @returns {{kind:string, topic:string, slides?:number, audience?:string}|null}
+ * @returns {{kind:string, topic:string, slides?:number, audience?:string, details?:string}|null}
  */
 export function detectDocRequest(text) {
-  const t = String(text || '').trim();
-  if (!t) return null;
+  const t0 = String(text || '').trim();
+  if (!t0) return null;
   // Must look like an instruction, not a question ABOUT presentations.
-  if (!/\b(make|create|build|generate|write|prepare|draft|do|give|design)\b/i.test(t)) return null;
+  if (!/\b(make|create|build|generate|write|prepare|draft|do|give|design)\b/i.test(t0)) return null;
 
   for (const [re, kind] of TRIGGERS) {
-    const m = re.exec(t);
+    const m = re.exec(t0);
     if (!m) continue;
+
+    // Extra instructions come FIRST so they can be removed from the topic
+    // (else "create ppt on history with: timeline" would become the topic).
+    let details = '';
+    let t = t0;
+    for (const dp of DETAIL_PATTERNS) {
+      const dm = dp.exec(t);
+      if (dm && dm[1].trim()) {
+        details = dm[1].replace(/\s+/g, ' ').trim().slice(0, 400);
+        t = t.slice(0, dm.index).replace(/[,;:]\s*$/, '').replace(/\b(that|which|and|with)\s*$/i, '');
+        break;
+      }
+    }
+
     // Everything after "on/about/for" is the topic.
     let topic = '';
     const on = /\b(?:on|about|for|regarding|covering)\s+(.+)$/i.exec(t);
@@ -113,9 +138,11 @@ export function detectDocRequest(text) {
                .replace(/\b(make|create|build|generate|write|prepare|draft|do|give|design|me|a|an|the|please)\b/gi, ' ')
                .replace(/\s+/g, ' ').trim();
     }
-    // "for Class 10" at the END is the audience, not the topic.
+    // "for Class 10" / "for Class 10 students" at the END is the audience,
+    // not the topic. Anchored, and the label must OPEN the clause — this is
+    // why "for my thesis" is still a topic but "for class 7" is an audience.
     let audience = '';
-    const aud = /\bfor\s+([^,.]+(?:class\s*\d+|students?|beginners?|kids|investors?|executives?|college|school|teachers?|professionals?|experts?|audience)[^,.]*)$/i.exec(topic);
+    const aud = /\bfor\s+((?:class\s*\d+|students?|beginners?|kids|investors?|executives?|college|school|teachers?|professionals?|experts?|audience)[^,.]*)$/i.exec(topic);
     if (aud) {
       audience = aud[1].trim();
       topic = topic.slice(0, aud.index).trim().replace(/\b(for|to)\s*$/i, '');
@@ -123,10 +150,11 @@ export function detectDocRequest(text) {
     topic = topic.replace(/[.!?]+$/, '').trim();
 
     // "a 10-slide presentation" / "10 slides on X"
-    const num = /\b(\d{1,2})\s*[- ]\s*(?:slides?|pages?)\b/i.exec(t);
+    const num = /\b(\d{1,2})\s*[- ]\s*(?:slides?|pages?)\b/i.exec(t0);
     return { kind, topic: topic || 'Untitled',
              ...(num ? { slides: Math.min(30, Math.max(3, parseInt(num[1], 10))) } : {}),
-             ...(audience ? { audience } : {}) };
+             ...(audience ? { audience } : {}),
+             ...(details ? { details } : {}) };
   }
   return null;
 }
@@ -165,6 +193,7 @@ const SYS = (kind, { slides = 0, audience = '' } = {}) => {
  * @param {object} [opts.engine]  same thing, explicit name
  * @param {number} [opts.slides]  requested slide count
  * @param {string} [opts.audience]
+ * @param {string} [opts.details] extra instructions ("with: history + timeline")
  * @param {Function} [opts.research] async (topic) => digest string | null
  * @param {Function} [opts.streamFn] test seam (router)
  * @param {number} [opts.timeoutMs]
@@ -172,7 +201,7 @@ const SYS = (kind, { slides = 0, audience = '' } = {}) => {
  *          raw?:string, deckReport?:object, researched?:boolean}>}
  */
 export async function outline({ kind, topic, ai = null, engine = null, slides = 0,
-                                audience = '', research = null, streamFn = null,
+                                audience = '', details = '', research = null, streamFn = null,
                                 timeoutMs = 90000 }) {
   if (!DOC_KINDS[kind]) return { ok: false, source: 'none', message: `Unknown type '${kind}'.` };
   const eng = engine || ai;
@@ -196,11 +225,19 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
   if (sel.provider === 'local') {
     return { ok: true, spec: outlineFallback(kind, topic), source: 'offline-template' };
   }
+  // Only a local model is available. Remember that so a failure can say the
+  // TRUE cause and tell the user exactly how to enable a backend.
+  const noApiKey = !router.FALLBACK_ORDER.some(id => config.getKey?.(id) || config.data?.apiKeys?.[id]);
+  const behind = router.usableBackend(eng);
+  const guidance = noApiKey && behind.reason
+    ? ` ${behind.reason}`
+    : '';
 
   const usrParts = [
     `Topic: ${topic}`,
     audience ? `Audience: ${audience}` : '',
     slides ? `Requested slide count: ${slides}` : '',
+    details ? `Extra instructions from the user — honour every one of them: ${details}` : '',
     digest ? `\nResearch digest (ground the content in this; cite sources on the references slide):\n${digest}` : '',
     '\nProduce the JSON now.',
   ].filter(Boolean);
@@ -219,7 +256,7 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
       ok: true, spec: outlineFallback(kind, topic), source: 'offline-template',
       raw: (r.raw || '').slice(0, 400),
       message: (r.message || 'The model did not return a usable outline')
-        + ' — built a skeleton instead.',
+        + ' — built a skeleton instead.' + guidance,
     };
   }
 
@@ -228,7 +265,7 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
     return {
       ok: true, spec: outlineFallback(kind, topic), source: 'offline-template',
       raw: (r.raw || '').slice(0, 400),
-      message: 'The model outline was unusable, so AURA built a skeleton you can edit.',
+      message: 'The model outline was unusable, so AURA built a skeleton you can edit.' + guidance,
     };
   }
 

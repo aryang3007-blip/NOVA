@@ -438,16 +438,29 @@ export class AIEngine {
         if (!caps?.[kind]) {
           return { success: false, message: `${kind} generation needs its Python library (${caps?.install?.[kind] || 'see requirements.txt'}).` };
         }
+        // "create ppt on X with: history + timeline" → details reach the model.
+        let details = String(p.details || '');
+        if (!details) {
+          const d = docAgent.detectDocRequest(String(rawInput || ''));
+          details = d?.details || '';
+        }
         const o = await docAgent.outline({
           kind, topic: String(p.topic || rawInput), engine: this,
           slides: Number(p.slides) || 0, audience: String(p.audience || ''),
-          research: (t) => this._researchDigest(t),
+          details, research: (t) => this._researchDigest(t),
         });
         if (!o.ok) return { success: false, message: o.message || 'Outline failed.' };
         const r = await A.docBuild(kind, o.spec, config.get('docFolder') || undefined);
         if (!r?.ok) return { success: false, message: r?.message || 'Could not build the file.' };
         const extras = [];
-        if (o.source === 'offline-template') extras.push('built from the offline template — no model was available');
+        if (o.source === 'offline-template') {
+          extras.push('built from the offline template — no model was available');
+        } else {
+          // HONEST FOOTER: say which provider+model actually wrote the deck,
+          // and mark fallbacks as fallbacks.
+          extras.push(`outlined by ${o.source}${o.model ? ` (${o.model})` : ''}`
+                      + (o.source.startsWith('fallback:') ? ' — your selected backend was unusable, so this one ran instead' : ''));
+        }
         if (o.researched) extras.push('grounded in live web research');
         if (o.deckReport && !o.deckReport.ok && o.deckReport.repaired) extras.push('weak slides were auto-repaired');
         if (r.validation && !r.validation.ok) extras.push(`validation notes: ${r.validation.issues.slice(0, 2).join('; ')}`);
