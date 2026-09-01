@@ -118,6 +118,9 @@ p, h, u = serve._cli_api_request("gemini", "KEY", [{"role": "system", "content":
                                  "gemini-2.5-flash", True, 4096, 0.5)
 rec("gemini streaming URL (alt=sse)", "streamGenerateContent?alt=sse" in u, u[:95])
 rec("gemini maxOutputTokens from caller", p["generationConfig"]["maxOutputTokens"] == 4096)
+rec("gemini disables thinking (budget 0) — the truncation fix",
+    p["generationConfig"].get("thinkingConfig", {}).get("thinkingBudget") == 0,
+    str(p["generationConfig"]))
 rec("gemini systemInstruction separated", p.get("systemInstruction", {}).get("parts", [{}])[0].get("text") == "be short")
 p, h, u = serve._cli_api_request("openai", "sk-x", [{"role": "user", "content": "hi"}],
                                  "gpt-4o-mini", False, 2048, 0.7)
@@ -187,6 +190,32 @@ rec("outline without slides → rejected", spec is None and "no slides" in note,
 spec, note = serve._cli_doc_spec(
     "docx", "X", complete_fn=lambda m, max_tokens=4096: (None, "The JSON was TRUNCATED mid-stream…"))
 rec("truncation cause passes through honestly", spec is None and "TRUNCATED" in note, note)
+rec("truncation note says it was retried with a tighter deck",
+    "retried with a tighter deck" in note, note)
+
+S("_cli_doc_spec — truncation retry saves the deck, cap raised to 8192")
+calls = []
+def _flaky(m, max_tokens=4096):
+    calls.append(max_tokens)
+    if len(calls) == 1:
+        return None, "The JSON was TRUNCATED mid-stream — got 5842 chars."
+    return {"title": "Fats", "slides": [{"kind": "title", "title": "Fats", "bullets": []},
+            {"kind": "bullets", "title": "Key", "bullets": ["one", "two"],
+             "notes": "short"}]}, ""
+spec, note = serve._cli_doc_spec("pptx", "Fats", 8, complete_fn=_flaky)
+rec("first attempt truncated → ONE compact retry succeeds", spec is not None and note == "", str(note))
+rec("pptx outline asks for 8192 tokens", calls and max(calls) == 8192, str(calls))
+rec("retry ran exactly twice", len(calls) == 2, str(len(calls)))
+rec("the rescued deck is real model content",
+    spec and spec["slides"][1]["bullets"] == ["one", "two"], "")
+
+calls2 = []
+def _always_bad(m, max_tokens=4096):
+    calls2.append(1)
+    return None, "The JSON was TRUNCATED mid-stream."
+spec2, note2 = serve._cli_doc_spec("pptx", "X", complete_fn=_always_bad)
+rec("still failing after retry → fallback note names the cause", spec2 is None and "TRUNCATED" in note2, note2)
+rec("never retries more than once", len(calls2) == 2, str(len(calls2)))
 rec("offline template always returns a real spec",
     bool(serve._cli_offline_spec("pptx", "Q")["slides"]) and
     bool(serve._cli_offline_spec("xlsx", "Q")["sheets"]) and

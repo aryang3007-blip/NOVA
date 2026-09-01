@@ -25,6 +25,7 @@ import * as docAgent from './doc-agent.js';
 import * as router from './router.js';
 import { buildContextPacket } from './context-packet.js';
 import { looksActionable, semanticToolSelect, verifyAndNarrate } from './semantic-tools.js';
+import { shouldVerify, appMatchesTitle, verificationNote } from './verify-loop.js';
 import { ModelRegistry, TASK } from './model-registry.js';
 import { extractToolCalls, normalizeToolCall, validateToolCall, toToolResult,
          buildToolManifest, toolProtocolPrompt, TOOLS } from './tools.js';
@@ -411,7 +412,18 @@ export class AIEngine {
       res = await this.executeToolCall(sel.call, 'semantic');
     }
 
-    const narr = verifyAndNarrate(sel.call.tool, res);
+    let narr = verifyAndNarrate(sel.call.tool, res);
+    if (narr.ok) {
+      // VERIFY LOOP on the semantic path too — "open YouTube" must be
+      // verified before we claim it worked.
+      try {
+        const v = await this._verifyOpenAction({
+          action: sel.call.tool,
+          target: sel.call.parameters?.application || sel.call.parameters?.url || '',
+        });
+        if (v) narr = { ...narr, text: `${narr.text}\n${verificationNote(v)}` };
+      } catch { /* verification never blocks the reply */ }
+    }
 
     // Global task log: every agent action becomes an episode with its
     // outcome, viewable via /api/db/memory/episodes and the dev trace.
@@ -675,7 +687,21 @@ export class AIEngine {
     if (!result.success && result.error === 'permission_denied' && result.permissionLabel) {
       body += `\n\n_Enable **${result.permissionLabel}** in Settings → Desktop → Permissions._`;
     }
+    // VERIFY LOOP — same honesty rule on the tool path.
+    let verification = null;
+    if (result.success) {
+      const spec = TOOLS[call.tool];
+      const verifyRequest = {
+        action: spec?.action || call.tool,
+        target: spec?.map ? (spec.map(call.parameters || {})?.target || '')
+                          : (call.parameters?.application || call.parameters?.url || ''),
+      };
+      try { verification = await this._verifyOpenAction(verifyRequest); }
+      catch { verification = null; }
+      if (verification) body += `\n\n_${verificationNote(verification)}_`;
+    }
     bus.emit('desktop:action-reported', { request: call, result: { ...result, ok: result.success } });
+    bus.emit('desktop:action-verified', { request: call, verification });
     await this._streamLocalText(body, {
       emotion: result.success ? 'confident' : 'confused',
       speakText: result.success
@@ -707,12 +733,80 @@ export class AIEngine {
     }
     if (result.suggestions?.length) body += `\n\nDid you mean: ${result.suggestions.join(', ')}?`;
 
+    // VERIFY LOOP (§9): a real launch gets one honest on-screen check before
+    // we narrate success. Never blocks the reply, never claims what we did
+    // not observe.
+    let verification = null;
+    if (result.ok) {
+      try { verification = await this._verifyOpenAction(request); }
+      catch { verification = null; }
+      if (verification) body += `\n\n_${verificationNote(verification)}_`;
+    }
+
     bus.emit('desktop:action-reported', { request, result });
+    bus.emit('desktop:action-verified', { request, verification });
     await this._streamLocalText(body, {
       emotion: result.ok ? 'confident' : 'confused',
-      speakText: spoken,
+      speakText: result.ok && verification?.verified ? `${spoken} Verified.` : spoken,
     });
     return true;
+  }
+
+  /**
+   * One verification pass for a launch request: bridge foreground-window
+   * title first, then (if a screen share is live and the title did not
+   * match) a single screen re-read. Two title attempts because apps take a
+   * moment to come to the foreground.
+   *
+   * @returns {Promise<{verified:boolean, app:string, method?:string,
+   *           title?:string, reason?:string}|null>} null = nothing to verify
+   */
+  async _verifyOpenAction(request) {
+    const target = String(request?.target
+      || request?.params?.app || request?.params?.application
+      || request?.params?.url || '').trim();
+    if (!shouldVerify({
+      enabled: config.get('verifyDesktopActions') !== false,
+      ok: true, simulated: false, target, action: request?.action,
+    })) return null;
+
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    // 1) foreground window title (bridge) — 2 tries for slow launches.
+    let win = null;
+    for (let i = 0; i < 2; i++) {
+      await sleep(i ? 900 : 450);
+      try { win = await this.actions?.activeWindow?.(); } catch { win = null; }
+      if (win?.ok && win.title) break;
+    }
+    if (win?.ok && win.title && appMatchesTitle(target, win.title)) {
+      return { verified: true, method: 'window', app: target, title: win.title };
+    }
+
+    // 2) screen re-read — only when a share is actually live.
+    if (this.screenAgent?.screen?.active) {
+      try {
+        const frame = this.screenAgent.screen.grab?.();
+        if (frame) {
+          const ocr = await this.screenAgent.transcribe(frame);
+          if (ocr?.ok) {
+            if (appMatchesTitle(target, ocr.text || '')) {
+              return { verified: true, method: 'screen', app: target };
+            }
+            return { verified: false, method: 'screen', app: target,
+              reason: 'the screen re-read does not show it — it may still be opening' };
+          }
+          return { verified: false, method: 'screen', app: target,
+            reason: `screen re-read failed: ${ocr.message || 'unknown error'}` };
+        }
+      } catch (e) {
+        return { verified: false, method: 'screen', app: target,
+          reason: `screen re-read errored: ${e?.message || e}` };
+      }
+    }
+    return { verified: false,
+             method: win ? 'window' : 'none', app: target,
+             reason: win ? 'the foreground window title does not match — it may still be opening'
+                         : 'no window service on the action bridge' };
   }
 
   /** Yes/no reply to a pending TOOL confirmation. */

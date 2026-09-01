@@ -1039,6 +1039,7 @@ class AuraApp {
       this.voice.output.speak('AURA voice system online. All modules nominal, Commander.'));
     bindText('set-sttlang', 'sttLang');
     bindCheck('set-autosend', 'autoSendOnFinal');
+    bindCheck('set-verify-actions', 'verifyDesktopActions');
     bindText('set-commander-greeting', 'commanderGreeting');
     bindCheck('set-wake', 'wakeWordEnabled', (v) => this.setWakeWord(v));
     bindText('set-wakeword', 'wakeWord');
@@ -1194,6 +1195,7 @@ class AuraApp {
     $('set-vol').value = c.ttsVolume; $('lbl-vol').textContent = Number(c.ttsVolume).toFixed(2);
     $('set-sttlang').value = c.sttLang;
     $('set-autosend').checked = c.autoSendOnFinal;
+    if ($('set-verify-actions')) $('set-verify-actions').checked = c.verifyDesktopActions !== false;
     $('set-commander-greeting').value = c.commanderGreeting || 'Yes, Commander?';
     $('set-wake').checked = c.wakeWordEnabled;
     if ($('set-wakeword')) $('set-wakeword').value = c.wakeWord || '';

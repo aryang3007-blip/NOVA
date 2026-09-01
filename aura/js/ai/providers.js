@@ -276,7 +276,12 @@ export const gemini = {
       body: JSON.stringify({
         contents,
         systemInstruction: system ? { parts: [{ text: system }] } : undefined,
-        generationConfig: { temperature, maxOutputTokens: maxTokens },
+        // thinkingBudget 0 — Gemini 2.5 counts thinking tokens INSIDE
+        // maxOutputTokens, which truncated long deck-outline JSON
+        // mid-stream ("JSON was TRUNCATED"). Outlines are mechanical; give
+        // the whole budget to actual output.
+        generationConfig: { temperature, maxOutputTokens: maxTokens,
+                           thinkingConfig: { thinkingBudget: 0 } },
       }),
     });
     await ensureOk(res, 'Gemini');

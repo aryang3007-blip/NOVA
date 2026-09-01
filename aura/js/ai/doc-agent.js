@@ -302,7 +302,7 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
 
   const r = await router.completeJSON({
     messages, engine: eng, streamFn, temperature: 0.45,
-    maxTokens: kind === 'pptx' ? 4096 : 2048, timeoutMs, retries: 1,
+    maxTokens: kind === 'pptx' ? 8192 : 4096, timeoutMs, retries: 1,
   });
 
   const attach = (s) => {

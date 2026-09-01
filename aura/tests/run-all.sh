@@ -9,7 +9,7 @@ for t in test-architecture test-core test-providers test-actions \
          test-gesture-wave test-desktop-tools test-vision-embeddings test-screen-agent \
          test-gestures-cursor test-task-agent test-runtime test-privacy-guard test-dwell \
          test-doc-agent test-doc-resilience test-sphere \
-         test-commander test-memory-recall test-avatar-import; do
+         test-commander test-memory-recall test-avatar-import test-verify-loop; do
   printf "  %-20s " "$t"
   node "tests/$t.mjs" | grep -oE "PASS [0-9]+" | tail -1
 done

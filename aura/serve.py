@@ -1185,8 +1185,13 @@ def _cli_api_request(provider_id, key, messages, model, stream, max_tokens, temp
             url = f"{base}/{model}:streamGenerateContent?alt=sse&key={key}"
         else:
             url = f"{base}/{model}:generateContent?key={key}"
+        # thinkingBudget 0: Gemini 2.5 models count THINKING tokens inside
+        # maxOutputTokens. A deck outline is mechanical JSON — with thinking
+        # on, the budget is eaten before the object closes and /doc reports
+        # "JSON TRUNCATED mid-stream". Disable it so the whole cap is output.
         payload = {"contents": contents, "generationConfig": {
-            "temperature": temperature, "maxOutputTokens": max_tokens}}
+            "temperature": temperature, "maxOutputTokens": max_tokens,
+            "thinkingConfig": {"thinkingBudget": 0}}}
         if system:
             payload["systemInstruction"] = {"parts": [{"text": system}]}
         return payload, {"Content-Type": "application/json"}, url
@@ -1546,9 +1551,24 @@ def _cli_doc_spec(kind, topic, slides=0, audience="", details="", complete_fn=No
              + (f"Audience: {audience}.\n" if audience else ""))
     usr = f"Topic: {topic}\n" + (f"Extra instructions: {details}\n" if details else "") + "Produce the JSON now."
     messages = [{"role": "system", "content": sys_p}, {"role": "user", "content": usr}]
-    max_tokens = 4096 if kind == "pptx" else 2048
+    max_tokens = 8192 if kind == "pptx" else 4096
     obj, note = (complete_fn or _cli_complete_json)(messages, max_tokens=max_tokens)
     if note:
+        # One bounded safety retry when the outline was cut off: tighter deck,
+        # same backend — a real 9-slide deck beats the offline template.
+        if "TRUNCATED" in note or "prose" in note.lower() or "empty" in note.lower():
+            tight_sys = sys_p.replace(
+                "8-12 content slides", "6-9 content slides").replace(
+                "(8-18 words)", "(6-12 words)")
+            tight_sys += ("\nCRITICAL: fit the ENTIRE JSON in one reply. If space runs low, "
+                          "prefer fewer slides and shorter bullets over an incomplete object. "
+                          "Speaker notes: one short sentence only.")
+            obj, note2 = (complete_fn or _cli_complete_json)(
+                [{"role": "system", "content": tight_sys}, {"role": "user", "content": usr}],
+                max_tokens=max_tokens)
+            if obj:
+                return obj, ""
+            note = f"{note} (retried with a tighter deck: {note2})"
         return None, note
     if not isinstance(obj, dict):
         return None, "The model returned JSON that was not an object."
