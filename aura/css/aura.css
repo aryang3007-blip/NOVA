@@ -278,7 +278,19 @@ body.ar-passthrough #ar-video-bg { display: block; }
   border-top: 1px dashed rgba(255,176,32,.3); background: rgba(255,176,32,.06); }
 
 /* ═══════════ COMPOSER ═══════════ */
-.composer { border-top: 1px solid var(--hair); padding: .8rem .9rem 1rem; background: transparent; }
+.composer { border-top: 1px solid var(--hair); padding: .8rem .9rem 1rem; background: transparent;
+  flex: 0 0 var(--composer-h, auto); }
+
+/* ═══════════ LAYOUT DRAG-RESIZERS (js/ui/resizers.js) ═══════════ */
+.au-splitter { position: absolute; z-index: 60; touch-action: none; user-select: none;
+  transition: background .15s; }
+.au-dock-splitter { right: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; }
+.au-panel-splitter { left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; }
+.au-composer-splitter { left: 0; right: 0; top: -4px; height: 8px; cursor: row-resize; }
+.au-splitter:hover { background: rgba(var(--accent-rgb), .18); }
+.au-splitter.au-dragging { background: rgba(var(--accent-rgb), .4); }
+body.au-resizing { cursor: grabbing; user-select: none; }
+.au-resize-off { display: none !important; }
 .composer-row { display: flex; gap: .4rem; align-items: flex-end; }
 .input { flex: 1; resize: none; max-height: 130px; padding: .68rem .9rem; border-radius: 22px;
   border: 1px solid var(--panel-brd); background: rgba(255,255,255,.045); font-size: .85rem;

@@ -38,6 +38,7 @@ import { providerList, PROVIDERS } from './ai/providers.js';
 import { localActions } from './actions/local-actions.js';
 import { SetupWizard } from './ui/setup.js';
 import { CommandPalette } from './ui/command-palette.js';
+import { initResizers } from './ui/resizers.js';
 import { registerScreenPlugin } from './plugins/screen.js';
 import { screenShare } from './vision/screen-share.js';
 import { RuntimeCore } from './runtime/runtime-core.js';
@@ -334,6 +335,13 @@ class AuraApp {
     this.buildUI();
     this.wireEvents();
     this.wireDOM();
+
+    // ── layout drag-resizers (dock / panels / composer). Returns null when
+    // the DOM shape is unexpected or we're below the mobile threshold.
+    this._resizerDispose = initResizers();
+    this.log(this._resizerDispose ? 'Layout resizers: active (drag edges, dbl-click to reset)'
+                                  : 'Layout resizers: inactive', this._resizerDispose ? 'ok' : 'info');
+
     // ── COMMAND CENTER (presentation only — reads live state + bus)
     this.commandCenter = new CommandCenter({
       ai: this.ai, runtime: this.runtime, memory: this.memoryManager,
