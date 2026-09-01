@@ -23,6 +23,7 @@ import secrets
 import sys
 import threading
 import urllib.request
+import urllib.error
 import webbrowser
 from urllib.parse import urlparse, parse_qs
 
@@ -92,6 +93,18 @@ def say(*parts, **kwargs):
     except UnicodeEncodeError:
         enc = (getattr(sys.stdout, "encoding", "") or "ascii")
         print(msg.encode(enc, "replace").decode(enc, "replace"), **kwargs)
+
+
+# ── server log gate: /log on|off ─────────────────────────────────────────
+# GUI-less users see every HTTP request, action and model swap in their
+# terminal. That gets loud fast, so logs are toggleable at runtime.
+_CLI_LOGS = True
+
+
+def _log(*parts, **kwargs):
+    """Server log line, suppressed while /log off (banners still print)."""
+    if _CLI_LOGS:
+        say(*parts, **kwargs)
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -565,7 +578,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "command": payload.get("command", "")
             }
             _VOICE_EVENT_QUEUE.put(ev)
-            say(c(32, f"  🎙 WAKE EVENT RECEIVED: {phrase} (score: {score:.2f}, source: {source})"))
+            _log(c(32, f"  🎙 WAKE EVENT RECEIVED: {phrase} (score: {score:.2f}, source: {source})"))
             return self._json({"ok": True, "message": "Wake event queued"})
 
         # ── device gateway ────────────────────────────────────────────────
@@ -656,7 +669,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if real and real != want:
                         payload["model"] = real
                         body = json.dumps(payload).encode()
-                        say(c(33, f"  {glyph(chr(0x21bb), '~')} model '{want}' -> '{real}'"))
+                        _log(c(33, f"  {glyph(chr(0x21bb), '~')} model '{want}' -> '{real}'"))
                     elif real is None:
                         return self._json({"ok": False, "error":
                             "No Ollama models installed. Run:  ollama pull gemma2:2b"}, 503)
@@ -667,7 +680,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     model = json.loads(body or b"{}").get("model", "")
                 except Exception:
                     model = ""
-                say(c(36, f"  {glyph(chr(0x2b07), 'v')} pulling model: {model}"))
+                _log(c(36, f"  {glyph(chr(0x2b07), 'v')} pulling model: {model}"))
             return self._stream_ollama(allowed[sub], body, note=note)
 
         if path != "/api/action":
@@ -700,7 +713,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         icon = c(32, glyph("✓", "OK")) if result.get("ok") else c(31, glyph("✗", "XX"))
         detail = params.get("app") or params.get("url") or params.get("query") or params.get("action") or ""
-        say(f"  {icon} ACTION {action} {detail} -> {result.get('message', '')}")
+        _log(f"  {icon} ACTION {action} {detail} -> {result.get('message', '')}")
         return self._json(result)
 
     def do_DELETE(self):
@@ -730,7 +743,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if "favicon" in msg or "apple-touch-icon" in msg:
             return
         if " 404 " in msg or " 500 " in msg:
-            say(c(31, msg))
+            _log(c(31, msg))
 
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -788,6 +801,10 @@ def _get_uptime_str():
 
 def _get_cli_model_info():
     global _CLI_MODEL
+    if _CLI_API_PROVIDER:
+        meta = CLI_API_PROVIDERS.get(_CLI_API_PROVIDER, {})
+        model_name = _CLI_API_MODEL or meta.get("default_model", "?")
+        return model_name, f"(via {meta.get('label', _CLI_API_PROVIDER)})"
     model_name = "gemma2:2b"
     params_str = "(2B parameters)"
     if ollama_proxy:
@@ -888,13 +905,14 @@ def _render_cli_banner():
 
     cmds = [
         ("/help", "Show help"),
-        ("/model", "Switch model"),
+        ("/model", "Switch backend"),
         ("/doc", "Doc capabilities"),
+        ("/log", "Toggle logs"),
         ("/policy", "Action policy"),
         ("/clear", "Clear chat"),
         ("/exit", "Exit CLI")
     ]
-    col_widths = [15, 15, 15, 15, 15, 14]
+    col_widths = [15, 15, 15, 15, 15, 14, 14]
 
     row_cmds_parts = []
     row_descs_parts = []
@@ -930,8 +948,645 @@ def _cli_banner():
     _render_cli_banner()
 
 
+# ════════════════════════════════════════════════════════════════════════
+# CLI API-provider mode  (Sept-01 batch)
+# ────────────────────────────────────────────────────────────────────────
+# The REPL used to be Ollama-only. Now the terminal can talk to the same
+# cloud providers as the web UI, using the same encrypted credential vault
+# (~/.aura) — no pasting keys into the terminal.
+#
+#   /model          interactive picker: [1..5] API providers, [6] Ollama
+#   /model gemini   pin API provider (+ optional :model name)
+#   /doc ppt on X   REAL model outline (API provider or Ollama) with an
+#                   honestly-labelled offline-template fallback + reason
+#   /log on|off     gate server logs in the terminal
+# ════════════════════════════════════════════════════════════════════════
+
+_CLI_API_PROVIDER = ""        # '' = Ollama mode; else e.g. 'gemini'
+_CLI_API_MODEL = ""           # '' = provider default
+_CLI_VAT = None               # {provider: key} loaded from the vault once
+
+CLI_API_PROVIDERS = {
+    "gemini": {"label": "Google Gemini", "default_model": "gemini-2.0-flash",
+               "kind": "gemini"},
+    "openai": {"label": "OpenAI", "default_model": "gpt-4o-mini", "kind": "openai"},
+    "groq": {"label": "Groq", "default_model": "llama-3.3-70b-versatile", "kind": "openai"},
+    "openrouter": {"label": "OpenRouter",
+                   "default_model": "meta-llama/llama-3.3-70b-instruct", "kind": "openai"},
+    "anthropic": {"label": "Anthropic",
+                  "default_model": "claude-3-5-haiku-20241022", "kind": "anthropic"},
+}
+# Order shown in the picker = the documented escalation order.
+CLI_API_ORDER = ["gemini", "openrouter", "openai", "groq", "anthropic"]
+
+
+def _cli_vault_key(provider: str) -> str:
+    """Key for `provider` from the encrypted vault (default profile first)."""
+    global _CLI_VAT
+    if _CLI_VAT is None:
+        _CLI_VAT = {}
+        try:
+            names = credential_vault.profile_names() or ["default"]
+            for prof in names:
+                k = credential_vault.get_key(provider, prof)
+                if k:
+                    _CLI_VAT[provider] = k
+                    break
+        except Exception as e:
+            say(c(31, f"  [vault unavailable: {e}]"))
+    if provider not in _CLI_VAT:
+        try:
+            k = credential_vault.get_key(provider) or None
+            if k:
+                _CLI_VAT[provider] = k
+        except Exception:
+            pass
+    return _CLI_VAT.get(provider, "")
+
+
+def _cli_vault_profiles():
+    try:
+        return credential_vault.profile_names()
+    except Exception:
+        return []
+
+
+def _cli_menu_entries():
+    """The /model picker rows (pure — unit-testable)."""
+    entries = []
+    for pid in CLI_API_ORDER:
+        meta = CLI_API_PROVIDERS[pid]
+        entries.append({
+            "kind": "api", "id": pid, "label": meta["label"],
+            "model": meta["default_model"],
+            "has_key": bool(_cli_vault_key(pid)),
+        })
+    entries.append({"kind": "ollama", "id": "ollama",
+                    "label": "Ollama (local models)", "model": "", "has_key": True})
+    entries.append({"kind": "ollama", "id": "ollama-auto",
+                    "label": "Ollama — auto (first installed)", "model": "", "has_key": True})
+    return entries
+
+
+def _cli_pick_entry(entries, choice):
+    """1-based pick → entry, or None (pure)."""
+    try:
+        n = int(choice)
+    except (TypeError, ValueError):
+        return None
+    return entries[n - 1] if 1 <= n <= len(entries) else None
+
+
+def _cli_model_menu():
+    """Interactive /model picker: [1..5] API providers, [6] Ollama, [7] auto."""
+    entries = _cli_menu_entries()
+    say("\n" + c(36, "── CLI MODEL PICKER ────────────────────────────────────────────"))
+    say(f"  {c(37, 'API PROVIDERS')}")
+    for i, e in enumerate(entries[:5], 1):
+        keymark = c(32, "✓ key") if e["has_key"] else c(31, "no key")
+        say(f"  [{i}] {c(36, e['label']):<22} {e['model']:<26} {keymark}")
+    for i, e in enumerate(entries[5:], 6):
+        say(f"  [{i}] {c(36, e['label'])}")
+    say(f"  {c(37, 'Tip:')} /model gemini, /model gemini:gemini-2.5-flash, /model <ollama-model>")
+    try:
+        choice = input("  Select 1-7 (Enter to cancel): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return
+    if not choice:
+        return
+    e = _cli_pick_entry(entries, choice)
+    if not e:
+        say(c(31, f"  '{choice}' is not a valid pick."))
+        return
+    if e["kind"] == "api":
+        if not e["has_key"]:
+            say(c(31, f"  {e['label']} has no key in the vault — add one in Settings or set it in the vault."))
+            return
+        _cli_set_api(e["id"], "")
+        say(c(32, f"  ◈ CLI now chats via {e['label']} ({e['model']})"))
+    elif e["id"] == "ollama-auto":
+        _cli_set_api("", "")
+        _CLI_MODEL = ""
+        say(c(32, "  CLI back to Ollama auto."))
+    else:
+        _cli_set_api("", "")
+        say(c(37, "  Ollama installed models: run /model list, or type /model <name>"))
+
+
+def _cli_set_api(provider: str, model: str = ""):
+    global _CLI_API_PROVIDER, _CLI_API_MODEL
+    _CLI_API_PROVIDER = provider
+    _CLI_API_MODEL = model
+
+
+def _cli_show_ollama_models(arg=""):
+    """List installed Ollama models (the pre-API view, kept for familiarity)."""
+    if not ollama_proxy:
+        say(c(31, "  Ollama proxy module unavailable."))
+        return
+    st = ollama_proxy.status(OLLAMA_BASE)
+    if not st.get("running"):
+        say(c(31, "  Ollama not running — cannot list models."))
+        say(c(33, "  Fix: run  ollama serve  in another terminal"))
+        return
+    models = st.get("models", [])
+    if not models:
+        say(c(33, "  No models installed. Run: ollama pull gemma2:2b"))
+        return
+    say("\n" + c(36, "  Installed Ollama models:"))
+    for i, m in enumerate(models):
+        name = m.get("name", "?")
+        params = m.get("params") or "?"
+        size = m.get("size_gb") or 0
+        marker = c(32, " ◄ active") if name == _CLI_MODEL else (c(37, " [auto]") if i == 0 and not _CLI_MODEL else "")
+        say(f"  [{i+1}] {c(36, name)}  {params}  {size:.1f}G{marker}")
+    say(f"\n  {c(37, 'Tip:')} /model <name> to pin, /model auto to reset")
+
+
+def _cli_pin_ollama(arg):
+    """Pin the CLI to a specific installed Ollama model."""
+    global _CLI_MODEL
+    if not ollama_proxy:
+        say(c(31, "  Ollama proxy module unavailable."))
+        return
+    st = ollama_proxy.status(OLLAMA_BASE)
+    if not st.get("running"):
+        say(c(31, "  Ollama not running — cannot select a model."))
+        return
+    names = st.get("names", [])
+    match = next((n for n in names if n == arg), None)
+    if not match:
+        match = next((n for n in names if n.lower().startswith(arg.lower())), None)
+    if not match:
+        match = next((n for n in names if arg.lower() in n.lower()), None)
+    if match:
+        _cli_set_api("", "")
+        _CLI_MODEL = match
+        say(c(32, f"  ◈ Pinned CLI to: {match}"))
+        say(c(37, "  Type any message to chat with this model"))
+    else:
+        say(c(31, f"  Model '{arg}' not found."))
+        say(c(33, f"  Installed: {', '.join(names) or 'none'}"))
+        say(c(37, "  Run /model to open the picker, or /model list for Ollama models"))
+
+
+def _cli_active_backend():
+    """What the REPL is using right now, in words (for banner + /doc)."""
+    if _CLI_API_PROVIDER:
+        meta = CLI_API_PROVIDERS[_CLI_API_PROVIDER]
+        model = _CLI_API_MODEL or meta["default_model"]
+        return {"mode": "api", "provider": _CLI_API_PROVIDER, "label": meta["label"],
+                "model": model}
+    model_name, _ = _get_cli_model_info()
+    return {"mode": "ollama", "provider": "ollama", "label": "Ollama (local)",
+            "model": model_name}
+
+
+def _cli_resolve_path(target, must_exist=True):
+    """
+    Safe path resolver for CLI /doc when the action bridge is off.
+    Same jail rule as bridge._resolve_path: home folder and below only.
+    """
+    raw = str(target or "").strip().strip('"').strip("'")
+    if not raw:
+        return None, "No path given."
+    raw = os.path.expandvars(os.path.expanduser(raw))
+    if not os.path.isabs(raw):
+        raw = os.path.join(os.path.expanduser("~"), raw)
+    p = os.path.realpath(raw)
+    home = os.path.realpath(os.path.expanduser("~"))
+    if not (p == home or p.startswith(home + os.sep)):
+        return None, f"Refused: '{target}' is outside your home folder."
+    if must_exist and not os.path.exists(p):
+        return None, f"Not found: {p}"
+    return p, None
+
+
+def _cli_api_url(provider_id):
+    """Endpoint for an OpenAI-compatible provider (pure)."""
+    return {
+        "openai": "https://api.openai.com/v1/chat/completions",
+        "groq": "https://api.groq.com/openai/v1/chat/completions",
+        "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    }.get(provider_id, "")
+
+
+def _cli_api_request(provider_id, key, messages, model, stream, max_tokens, temperature):
+    """Build (payload, headers, url) for one provider. Pure — unit-testable."""
+    meta = CLI_API_PROVIDERS[provider_id]
+    kind = meta.get("kind", "openai")
+    system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
+    convo = [m for m in messages if m.get("role") != "system"]
+    if kind == "gemini":
+        contents = [{"role": "model" if m["role"] == "assistant" else "user",
+                     "parts": [{"text": m["content"]}]} for m in convo]
+        base = "https://generativelanguage.googleapis.com/v1beta/models"
+        if stream:
+            url = f"{base}/{model}:streamGenerateContent?alt=sse&key={key}"
+        else:
+            url = f"{base}/{model}:generateContent?key={key}"
+        payload = {"contents": contents, "generationConfig": {
+            "temperature": temperature, "maxOutputTokens": max_tokens}}
+        if system:
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
+        return payload, {"Content-Type": "application/json"}, url
+    if kind == "anthropic":
+        payload = {"model": model, "messages": convo, "max_tokens": max_tokens,
+                   "temperature": temperature, "stream": stream}
+        if system:
+            payload["system"] = system
+        return (payload,
+                {"Content-Type": "application/json", "x-api-key": key,
+                 "anthropic-version": "2023-06-01"},
+                "https://api.anthropic.com/v1/messages")
+    payload = {"model": model, "messages": messages, "stream": stream,
+               "max_tokens": max_tokens, "temperature": temperature}
+    return (payload,
+            {"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+            _cli_api_url(provider_id))
+
+
+def _cli_parse_sse_delta(data: str, kind: str):
+    """One SSE `data:` payload → visible text delta, or None. Pure."""
+    if not data or data == "[DONE]":
+        return None
+    try:
+        evt = json.loads(data)
+    except Exception:
+        return None
+    if kind == "gemini":
+        parts = ((evt.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        return "".join(p.get("text", "") for p in parts) or None
+    if kind == "anthropic":
+        if evt.get("type") == "content_block_delta":
+            return (evt.get("delta") or {}).get("text")
+        return None
+    delta = ((evt.get("choices") or [{}])[0].get("delta") or {})
+    return delta.get("content")
+
+
+def _cli_api_response_text(kind: str, body: str):
+    """Non-stream body → plain text. Pure."""
+    try:
+        evt = json.loads(body or "{}")
+    except Exception:
+        return ""
+    if kind == "gemini":
+        parts = ((evt.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        return "".join(p.get("text", "") for p in parts)
+    if kind == "anthropic":
+        return "".join(b.get("text", "") for b in (evt.get("content") or [])
+                       if isinstance(b, dict))
+    return (evt.get("choices") or [{}])[0].get("message", {}).get("content", "")
+
+
+def _cli_sse_lines(resp, buffer_size=2048):
+    """Yield SSE lines from a response object. Test seam-friendly."""
+    buf = ""
+    while True:
+        chunk = resp.read(buffer_size)
+        if not chunk:
+            break
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode("utf-8", "replace")
+        buf += chunk
+        lines = buf.split("\n")
+        buf = lines.pop()
+        for line in lines:
+            yield line.strip()
+    if buf.strip():
+        yield buf.strip()
+
+
+def _cli_api_stream(provider_id, messages, on_delta, max_tokens=2048, urlopen_fn=None):
+    """Stream a chat from an API provider. Returns (code, error_or_None)."""
+    meta = CLI_API_PROVIDERS.get(provider_id)
+    if not meta:
+        return 404, f"Unknown CLI provider '{provider_id}'."
+    key = _cli_vault_key(provider_id)
+    if not key:
+        return 403, (f"No {meta['label']} key in the vault. "
+                     "Add it in AURA Settings → AI Core, then restart the server.")
+    model = _CLI_API_MODEL or meta["default_model"]
+    payload, headers, url = _cli_api_request(provider_id, key, messages, model, True,
+                                             max_tokens, 0.7)
+    try:
+        opener = urlopen_fn or urllib.request.urlopen
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                     method="POST", headers=headers)
+        with opener(req, timeout=300) as r:
+            for line in _cli_sse_lines(r):
+                if not line.startswith("data:"):
+                    continue
+                delta = _cli_parse_sse_delta(line[5:].strip(), meta["kind"])
+                if delta:
+                    on_delta(delta)
+        return 200, None
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")[:400]
+    except Exception as e:
+        return 503, f"{meta['label']} request failed: {e}"
+
+
+def _cli_complete_json(messages, max_tokens=4096, timeout=300, urlopen_fn=None):
+    """
+    One non-streaming completion, decoded to JSON.
+    Returns (obj|None, note). note is '' on success, else the TRUE cause.
+    """
+    if _CLI_API_PROVIDER:
+        meta = CLI_API_PROVIDERS[_CLI_API_PROVIDER]
+        key = _cli_vault_key(_CLI_API_PROVIDER)
+        if not key:
+            return None, f"No {meta['label']} key in the vault."
+        model = _CLI_API_MODEL or meta["default_model"]
+        payload, headers, url = _cli_api_request(_CLI_API_PROVIDER, key, messages,
+                                                 model, False, max_tokens, 0.45)
+        try:
+            opener = urlopen_fn or urllib.request.urlopen
+            req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                         method="POST", headers=headers)
+            with opener(req, timeout=timeout) as r:
+                body = r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return None, f"{meta['label']} HTTP {e.code}: {e.read().decode('utf-8','replace')[:200]}"
+        except Exception as e:
+            return None, f"{meta['label']} request failed: {e}"
+        text = _cli_api_response_text(meta["kind"], body)
+        return _cli_extract_json(text)
+    return _cli_ollama_complete(messages, max_tokens)
+
+
+def _cli_ollama_complete(messages, max_tokens=4096):
+    """Ollama non-streaming completion → (obj|None, note)."""
+    if not ollama_proxy:
+        return None, "Ollama proxy module missing."
+    st = ollama_proxy.status(OLLAMA_BASE)
+    if not st.get("running"):
+        return None, f"Ollama offline: {st.get('reason', 'not reachable')}"
+    chat_models = [m["name"] for m in st.get("models", [])
+                   if "embedding" not in (m.get("caps") or [])]
+    names = st.get("names", [])
+    if not chat_models and not names:
+        return None, "No Ollama models installed. Run: ollama pull gemma2:2b"
+    model = _CLI_MODEL if (_CLI_MODEL in names) else (chat_models or names)[0]
+    payload = {"model": model, "messages": messages, "stream": False,
+               "options": {"num_predict": max_tokens, "temperature": 0.45}}
+    chunks = []
+    code, err = ollama_proxy.proxy_stream(
+        OLLAMA_BASE, "/api/chat", "POST", json.dumps(payload).encode(),
+        lambda b: chunks.append(b))
+    if err:
+        return None, f"Ollama error {code}: {err}"
+    raw = b"".join(chunks).decode("utf-8", "replace")
+    text = ""
+    for line in raw.splitlines():
+        try:
+            evt = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(evt, dict) and evt.get("message", {}).get("content"):
+            text = evt["message"]["content"]
+    if not text:
+        return None, f"Ollama empty answer ({len(raw)} bytes)."
+    return _cli_extract_json(text)
+
+
+def _cli_extract_json(text):
+    """
+    Lenient JSON extraction (fence strip, balanced-brace scan).
+    Returns (obj|None, note); note is '' on success, else a TRUE cause —
+    never the generic 'no usable JSON'.
+    """
+    s = str(text or "").strip()
+    if not s:
+        return None, "The model returned an empty response."
+    s = _re.sub(r"^```(?:json)?\s*|\s*```$", "", s.strip(), flags=_re.I).strip()
+    try:
+        return json.loads(s), ""
+    except Exception:
+        pass
+    start = s.find("{")
+    if start < 0:
+        return None, f"The model replied with prose, not JSON (first 60: {s[:60]!r})."
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                cand = s[start:i + 1]
+                try:
+                    return json.loads(cand), ""
+                except Exception:
+                    return None, (f"The JSON was malformed: {cand[:80]!r}… "
+                                  "(repaired extractor could not parse it)")
+    return None, (f"The JSON was TRUNCATED mid-stream — got {len(s)} chars, "
+                  f"the object never closes. Usually the model hit its output cap; "
+                  f"a shorter deck or larger num_predict fixes it.")
+
+
+def _cli_doc_kind(arg):
+    """Parse '/doc <kind> on|of|about <topic>' → (kind, topic, slides, audience, details)."""
+    low = arg.lower().strip()
+    kind = "docx"
+    if any(w in low for w in ("ppt", "powerpoint", "slides", "presentation", "deck")):
+        kind = "pptx"
+    elif any(w in low for w in ("sheet", "excel", "xlsx", "spreadsheet", "workbook")):
+        kind = "xlsx"
+    elif any(w in low for w in ("report", "doc", "docx", "word", "essay")):
+        kind = "docx"
+
+    # details: "with: ..." / "must include ..." — extracted FIRST
+    details = ""
+    m = _re.search(r",?\s*(?:with|including)\s*:\s*([^.!?\n]+)$", arg, _re.I) \
+        or _re.search(r"\bmust\s+include\s+([^.!?\n]+)$", arg, _re.I)
+    if m:
+        details = m.group(1).strip()
+        arg = arg[:m.start()].rstrip(" ,;:")
+        arg = _re.sub(r"\b(that|which|and|with)\s*$", "", arg, flags=_re.I).rstrip()
+
+    # audience: "for class 10 [students]" at the END
+    audience = ""
+    am = _re.search(r"\bfor\s+((?:class\s*\d+|students?|beginners?|kids|investors?|"
+                    r"executives?|college|school|teachers?|professionals?|experts?|"
+                    r"audience)[^,.]*)$", arg, _re.I)
+    if am:
+        audience = am.group(1).strip()
+        arg = arg[:am.start()].rstrip(" ,;:")
+
+    # topic: everything after on/about/for/of, else text minus the kind word
+    sep = _re.search(r"\b(?:on|about|for|regarding|covering|of)\s+(.+)$", arg, _re.I)
+    if sep:
+        topic = sep.group(1).strip()
+    else:
+        topic = _re.sub(
+            r"^(?:make|create|build|generate|write|prepare|draft|a|an|the|please|"
+            r"\d+\s*(?:slide|slides|page|pages)?\s*)", "", arg, flags=_re.I)
+        topic = _re.sub(r"\b(?:ppt|pptx|powerpoint|slides|presentation|deck|sheet|excel|"
+                        r"xlsx|spreadsheet|report|doc|docx|word|essay)\s*", "", topic,
+                        flags=_re.I).strip()
+        topic = _re.sub(r"^(?:on|about|for|of|regarding|covering)\s*", "", topic,
+                        flags=_re.I).strip()
+    topic = _re.sub(r"[.!?]+$", "", topic).strip() or "Analysis"
+
+    slides = 0
+    sm = _re.search(r"(\d{1,2})\s*[- ]\s*(?:slides?|pages?)", arg, _re.I)
+    if sm:
+        slides = min(30, max(3, int(sm.group(1))))
+    return kind, topic, slides, audience, details
+
+
+def _cli_offline_spec(kind, topic):
+    """The honest offline template (same content as the old hardcoded specs)."""
+    import datetime
+
+    today_str = datetime.date.today().strftime('%d %B %Y')
+    if kind == "pptx":
+        return {
+            "title": topic.title(),
+            "subtitle": f"AURA Intelligence Briefing · {today_str}",
+            "slides": [
+                {"title": f"Overview of {topic.title()}",
+                 "bullets": [f"Key contextual factors and drivers for {topic}",
+                             "Current landscape, observations, and modern trends",
+                             "Strategic scope and objectives"]},
+                {"title": "Key Dynamics & Assessment",
+                 "bullets": ["Primary findings and data indicators",
+                             "Risk vectors, challenge areas, and critical bottlenecks",
+                             "Comparative impact across operational areas"]},
+                {"title": "Strategic Recommendations",
+                 "bullets": ["High-priority action items for stakeholders",
+                             "Policy frameworks, standards, and practical methods",
+                             "Resource allocation and timeline milestones"]},
+                {"title": "Summary & Next Steps",
+                 "bullets": ["Core takeaways synthesized",
+                             "Future outlook and progressive roadmap",
+                             "Action items and ongoing measurement"]},
+            ],
+        }
+    if kind == "xlsx":
+        return {
+            "title": f"{topic.title()} Summary",
+            "sheets": [{
+                "name": "Summary",
+                "columns": ["Item / Metric", "Category", "Baseline", "Target", "Status", "Notes"],
+                "rows": [
+                    [f"{topic.title()} - Primary Factor", "Strategic", 100, 150, "Active", "On schedule"],
+                    [f"{topic.title()} - Operational Metric", "Core", 85, 95, "Review", "Quarterly evaluation"],
+                    [f"{topic.title()} - Performance Target", "Growth", 210, 280, "Active", "High priority"],
+                    ["Summary Total", "Aggregate", 395, 525, "On Track", "Baseline tracking"],
+                ],
+            }],
+        }
+    return {
+        "title": f"Report: {topic.title()}",
+        "subtitle": f"AURA Comprehensive Analysis · {today_str}",
+        "sections": [
+            {"heading": "Executive Summary", "level": 1,
+             "paragraphs": [f"This report provides an in-depth, structured evaluation of {topic}. "
+                            "It outlines the primary background, current operational and situational "
+                            "landscape, and strategic recommendations for stakeholders."],
+             "bullets": [f"Clear synthesis of current {topic} developments",
+                         "Evaluation of critical risk vectors and opportunities"]},
+            {"heading": "Context & Background", "level": 1,
+             "paragraphs": [f"Understanding {topic} requires examining both historical precedents "
+                            "and recent shifts in the operational environment."]},
+            {"heading": "Analysis & Findings", "level": 1,
+             "paragraphs": [f"Analysis indicates multiple intersecting dynamics across {topic}."],
+             "bullets": ["Primary finding 1: Core trend identification and impact",
+                         "Primary finding 2: Strategic dependencies and vulnerability areas",
+                         "Primary finding 3: Resource allocation and implementation factors"]},
+            {"heading": "Recommendations & Next Steps", "level": 1,
+             "paragraphs": [f"To effectively navigate challenges surrounding {topic}, structured "
+                            "milestones and continuous assessment must be prioritized."],
+             "bullets": ["Immediate action items (30-60 days)",
+                         "Medium-term strategic initiatives",
+                         "Long-term governance and review process"]},
+        ],
+    }
+
+
+def _cli_doc_spec(kind, topic, slides=0, audience="", details="", complete_fn=None):
+    """
+    Ask the ACTIVE backend (API provider or Ollama) for a real outline.
+    Returns (spec|None, note); note is '' on success, else the honest cause.
+    `complete_fn` is a test seam for _cli_complete_json.
+    """
+    schemas = {
+        "pptx": ('{"title":"…","slides":[{"kind":"title|bullets|two-column|process|timeline|'
+                 'stats|comparison|quote|conclusion|references","title":"…","purpose":"…",'
+                 '"bullets":["…"],"notes":"…"}]}'),
+        "xlsx": '{"title":"…","sheets":[{"name":"…","columns":["…"],"rows":[[1,"…"]]}]}',
+        "docx": '{"title":"…","sections":[{"heading":"…","paragraphs":["…"],"bullets":["…"]}]}',
+    }
+    rules = {
+        "pptx": ("8-12 content slides unless a count was requested. Slide 1 kind 'title'. "
+                 "Last slide 'conclusion' + 'references'. Every content slide: 3-5 real bullets "
+                 "(8-18 words) and speaker notes. No invented facts."),
+        "xlsx": ("One sheet, 3-6 columns, 8-20 rows; numbers are JSON numbers."),
+        "docx": ("4-8 sections; each heading with 1-3 paragraphs of real content."),
+    }[kind]
+    sys_p = (f"You are a world-class document designer. Reply with ONE JSON object and nothing "
+             f"else — no prose, no markdown fences.\n\nShape: {schemas[kind]}\n\nRules: {rules}\n"
+             + (f"The user asked for {slides} slides.\n" if slides else "")
+             + (f"Audience: {audience}.\n" if audience else ""))
+    usr = f"Topic: {topic}\n" + (f"Extra instructions: {details}\n" if details else "") + "Produce the JSON now."
+    messages = [{"role": "system", "content": sys_p}, {"role": "user", "content": usr}]
+    max_tokens = 4096 if kind == "pptx" else 2048
+    obj, note = (complete_fn or _cli_complete_json)(messages, max_tokens=max_tokens)
+    if note:
+        return None, note
+    if not isinstance(obj, dict):
+        return None, "The model returned JSON that was not an object."
+    if kind == "pptx" and not (isinstance(obj.get("slides"), list) and obj["slides"]):
+        return None, "The model outline had no slides."
+    if kind == "xlsx" and not (isinstance(obj.get("sheets"), list) and obj["sheets"]):
+        return None, "The model outline had no sheets."
+    if kind == "docx" and not (isinstance(obj.get("sections"), list) and obj["sections"]):
+        return None, "The model outline had no sections."
+    return obj, ""
+
+
 def _cli_chat(text):
     global _CLI_MODEL
+    messages = [
+        {"role": "system", "content": "You are AURA, a concise AI assistant in a terminal CLI. Keep answers short and direct. Use plain text, avoid markdown except for code blocks."},
+        {"role": "user", "content": text},
+    ]
+
+    if _CLI_API_PROVIDER:
+        meta = CLI_API_PROVIDERS[_CLI_API_PROVIDER]
+        model = _CLI_API_MODEL or meta["default_model"]
+        diamond = glyph("◇", "*")
+        who = meta["label"]
+        sys.stdout.write(f"\n{c(35, f'{diamond} AURA ({who}: {model})')}  ")
+        sys.stdout.flush()
+
+        def on_api_delta(delta):
+            sys.stdout.write(delta)
+            sys.stdout.flush()
+
+        code, err = _cli_api_stream(_CLI_API_PROVIDER, messages, on_api_delta)
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
+        if err:
+            say(c(31, f"  [Chat error {code}: {err}]"))
+        return
+
     if not ollama_proxy:
         say(c(31, "  [AI offline: Ollama proxy module missing]"))
         return
@@ -957,11 +1612,9 @@ def _cli_chat(text):
 
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": "You are AURA, a concise AI assistant in a terminal CLI. Keep answers short and direct. Use plain text, avoid markdown except for code blocks."},
-            {"role": "user", "content": text}
-        ],
-        "stream": True
+        "messages": messages,
+        "stream": True,
+        "options": {"num_predict": 2048},   # same truncation fix as the web UI
     }
 
     def on_chunk(chunk_bytes):
@@ -1012,12 +1665,13 @@ def _terminal_repl_loop():
                 if cmd in ("/help", "/h"):
                     say("\n" + c(36, "── AVAILABLE CLI COMMANDS ──────────────────────────────────────────"))
                     say(f"  {c(33, '/help')}                Show this help message")
-                    say(f"  {c(33, '/model')}               List installed Ollama models")
-                    say(f"  {c(33, '/model <name>')}       Pin CLI chat to a specific model")
-                    say(f"  {c(33, '/model auto')}          Auto-pick best available model")
+                    say(f"  {c(33, '/model')}               Picker: API providers + Ollama models")
+                    say(f"  {c(33, '/model gemini[:model]')}  Pin CLI to an API provider")
+                    say(f"  {c(33, '/model <ollama-name>')} Pin CLI to a local model")
                     say(f"  {c(33, '/doc')}                 Check document generator capabilities")
+                    say(f"  {c(33, '/log on|off')}          Toggle server logs in this terminal")
                     say(f"  {c(33, '/policy')}              View Action Bridge security policy")
-                    say(f"  {c(33, '/status')}              System telemetry (CPU, RAM, Ollama)")
+                    say(f"  {c(33, '/status')}              System telemetry (CPU, RAM, backend)")
                     say(f"  {c(33, '/apps')}                List detected local desktop applications")
                     say(f"  {c(33, '/open <app|url>')}    Launch desktop app or website")
                     say(f"  {c(33, '/clear')}               Clear screen & refresh dashboard")
@@ -1047,10 +1701,7 @@ def _terminal_repl_loop():
                         elif any(w in low for w in ("report", "doc", "docx", "word", "essay")):
                             kind = "docx"
 
-                        # Extract clean topic
-                        import re
-                        topic = re.sub(r"^(ppt|pptx|powerpoint|slides|presentation|sheet|excel|xlsx|spreadsheet|report|doc|docx|word|essay)\s+(on|about|for|of)?\s*", "", arg, flags=re.I).strip()
-                        topic = re.sub(r"^(on|about|for|of)\s+", "", topic, flags=re.I).strip() or "Analysis"
+                        kind, topic, slides, audience, details = _cli_doc_kind(arg)
 
                         caps = docbuilder.capabilities()
                         if not caps.get(kind):
@@ -1058,46 +1709,30 @@ def _terminal_repl_loop():
                             continue
 
                         say(f"\n  {c(33, '⚡ Generating')} {kind.upper()} for: {c(36, topic)}...")
-                        import datetime
-                        today_str = datetime.date.today().strftime('%d %B %Y')
-                        if kind == "pptx":
-                            spec = {
-                                "title": topic.title(),
-                                "subtitle": f"AURA Intelligence Briefing · {today_str}",
-                                "slides": [
-                                    {"title": f"Overview of {topic.title()}", "bullets": [f"Key contextual factors and drivers for {topic}", "Current landscape, observations, and modern trends", "Strategic scope and objectives"]},
-                                    {"title": "Key Dynamics & Assessment", "bullets": ["Primary findings and data indicators", "Risk vectors, challenge areas, and critical bottlenecks", "Comparative impact across operational areas"]},
-                                    {"title": "Strategic Recommendations", "bullets": ["High-priority action items for stakeholders", "Policy frameworks, standards, and practical methods", "Resource allocation and timeline milestones"]},
-                                    {"title": "Summary & Next Steps", "bullets": ["Core takeaways synthesized", "Future outlook and progressive roadmap", "Action items and ongoing measurement"]}
-                                ]
-                            }
-                        elif kind == "xlsx":
-                            spec = {
-                                "title": f"{topic.title()} Summary",
-                                "sheets": [{
-                                    "name": "Summary",
-                                    "columns": ["Item / Metric", "Category", "Baseline", "Target", "Status", "Notes"],
-                                    "rows": [
-                                        [f"{topic.title()} - Primary Factor", "Strategic", 100, 150, "Active", "On schedule"],
-                                        [f"{topic.title()} - Operational Metric", "Core", 85, 95, "Review", "Quarterly evaluation"],
-                                        [f"{topic.title()} - Performance Target", "Growth", 210, 280, "Active", "High priority"],
-                                        ["Summary Total", "Aggregate", 395, 525, "On Track", "Baseline tracking"]
-                                    ]
-                                }]
-                            }
-                        else:
-                            spec = {
-                                "title": f"Report: {topic.title()}",
-                                "subtitle": f"AURA Comprehensive Analysis · {today_str}",
-                                "sections": [
-                                    {"heading": "Executive Summary", "level": 1, "paragraphs": [f"This report provides an in-depth, structured evaluation of {topic}. It outlines the primary background, current operational and situational landscape, and strategic recommendations for stakeholders."], "bullets": [f"Clear synthesis of current {topic} developments", "Evaluation of critical risk vectors and opportunities"]},
-                                    {"heading": "Context & Background", "level": 1, "paragraphs": [f"Understanding {topic} requires examining both historical precedents and recent shifts in the operational environment. Key data points highlight growing urgency and notable systemic patterns."]},
-                                    {"heading": "Analysis & Findings", "level": 1, "paragraphs": [f"Analysis indicates multiple intersecting dynamics across {topic}. Proactive intervention and systematic measurement remain vital for sustainable outcomes."], "bullets": ["Primary finding 1: Core trend identification and impact", "Primary finding 2: Strategic dependencies and vulnerability areas", "Primary finding 3: Resource allocation and implementation factors"]},
-                                    {"heading": "Recommendations & Next Steps", "level": 1, "paragraphs": [f"To effectively navigate challenges surrounding {topic}, structured milestones and continuous assessment must be prioritized."], "bullets": ["Immediate action items (30-60 days)", "Medium-term strategic initiatives", "Long-term governance and review process"]}
-                                ]
-                            }
+                        backend = _cli_active_backend()
+                        say(f"  {c(37, 'Backend:')} {backend['label']} ({backend['model']})")
 
-                        res = docbuilder.build(kind, spec, folder=docbuilder.default_folder(), resolver=bridge._resolve_path if bridge else None)
+                        # REAL MODEL OUTLINE via the active backend; honest
+                        # offline-template fallback with the TRUE reason.
+                        spec, note = _cli_doc_spec(kind, topic, slides, audience, details)
+                        spec_source = None
+                        if spec is not None:
+                            spec_source = f"{backend['label']} ({backend['model']})"
+                            say(f"  {c(32, '✓ Model outline received')} from {spec_source}")
+                        else:
+                            spec = _cli_offline_spec(kind, topic)
+                            say(f"  {c(33, '⚠ Model outline failed:')} {note}")
+                            say(c(33, "  → using the OFFLINE TEMPLATE (structure only, no model content)"))
+
+                        if spec_source:
+                            say(f"  {c(37, 'Outline:')} {spec_source}"
+                                + (f" · {slides} slides requested" if slides else "")
+                                + (f" · audience: {audience}" if audience else "")
+                                + (f" · notes: {details}" if details else ""))
+                        else:
+                            say(c(37, "  Outline: offline template — no model ran."))
+                        res = docbuilder.build(kind, spec, folder=docbuilder.default_folder(),
+                                               resolver=bridge._resolve_path if bridge else _cli_resolve_path)
                         if res.get("ok"):
                             kb = round(res.get('bytes', 0) / 1024, 1)
                             say(f"  {c(32, '✓ CREATED:')} {res.get('path')} ({kb} KB)\n")
@@ -1181,44 +1816,47 @@ def _terminal_repl_loop():
                             say(c(33, "  Fix: run  ollama serve  in another terminal"))
                         say("")
                 elif cmd in ("/model",):
-                    if not ollama_proxy:
-                        say(c(31, "  Ollama proxy module unavailable."))
-                    else:
-                        st = ollama_proxy.status(OLLAMA_BASE)
-                        if not st.get("running"):
-                            say(c(31, "  Ollama not running — cannot list models."))
-                        elif not arg or arg.lower() == "list":
-                            models = st.get("models", [])
-                            if not models:
-                                say(c(33, "  No models installed. Run: ollama pull gemma2:2b"))
-                            else:
-                                say("\n" + c(36, "  Installed Ollama models:"))
-                                for i, m in enumerate(models):
-                                    name   = m.get("name", "?")
-                                    params = m.get("params") or "?"
-                                    size   = m.get("size_gb") or 0
-                                    marker = c(32, " ◄ active") if name == _CLI_MODEL else (c(37, " [auto]") if i == 0 and not _CLI_MODEL else "")
-                                    say(f"  [{i+1}] {c(36, name)}  {params}  {size:.1f}G{marker}")
-                                say(f"\n  {c(37, 'Tip:')} /model <name> to pin, /model auto to reset")
-                        elif arg.lower() == "auto":
-                            _CLI_MODEL = ""
-                            say(c(32, "  Model set to auto (first available chat model)"))
+                    lowarg = arg.lower()
+                    if not arg:
+                        # Interactive picker: [1..5] API providers, [6..7] Ollama.
+                        # When stdin is piped the menu still prints and the
+                        # pick simply cancels (EOF) — never crashes.
+                        _cli_model_menu()
+                    elif lowarg in ("api", "picker", "menu"):
+                        _cli_model_menu()
+                    elif lowarg.startswith("ollama") or lowarg == "list":
+                        # Ollama-only listing (old behaviour preserved).
+                        _cli_show_ollama_models(arg)
+                    elif lowarg == "auto":
+                        _cli_set_api("", "")
+                        _CLI_MODEL = ""
+                        say(c(32, f"  CLI set to Ollama auto. Active: {_cli_active_backend()['label']}"))
+                    elif ":" in lowarg or lowarg in CLI_API_PROVIDERS or lowarg.split(":")[0] in CLI_API_PROVIDERS:
+                        pid = lowarg.split(":")[0]
+                        model = arg.split(":", 1)[1].strip() if ":" in arg else ""
+                        if pid not in CLI_API_PROVIDERS:
+                            say(c(31, f"  Unknown API provider '{pid}'. Use: /model gemini|openai|groq|openrouter|anthropic"))
+                        elif not _cli_vault_key(pid):
+                            say(c(31, f"  No {CLI_API_PROVIDERS[pid]['label']} key in the vault."))
+                            say(c(33, "  Add it in AURA Settings → AI Core (keys are stored encrypted), then restart the server."))
                         else:
-                            names = st.get("names", [])
-                            match = next((n for n in names if n == arg), None)
-                            if not match:
-                                match = next((n for n in names if n.lower().startswith(arg.lower())), None)
-                            if not match:
-                                match = next((n for n in names if arg.lower() in n.lower()), None)
-                            if match:
-                                _CLI_MODEL = match
-                                say(c(32, f"  ◈ Pinned CLI to: {match}"))
-                                say(c(37,  "  Type any message to chat with this model"))
-                            else:
-                                say(c(31, f"  Model '{arg}' not found."))
-                                say(c(33, f"  Installed: {', '.join(names) or 'none'}"))
-                                say(c(37,  "  Run /model to list available models"))
-                        say("")
+                            _cli_set_api(pid, model)
+                            say(c(32, f"  ◈ CLI now chats via {CLI_API_PROVIDERS[pid]['label']} "
+                                      f"({model or CLI_API_PROVIDERS[pid]['default_model']})"))
+                            if model:
+                                say(c(33, "  Model must exist in your provider account or the call will 404."))
+                    else:
+                        _cli_pin_ollama(arg)
+                    say("")
+                elif cmd in ("/log",):
+                    if arg.lower() in ("on", "yes", "1"):
+                        _CLI_LOGS = True
+                        say(c(32, "  Server logs: ON"))
+                    elif arg.lower() in ("off", "no", "0"):
+                        _CLI_LOGS = False
+                        say(c(32, "  Server logs: OFF (banners and replies still print)"))
+                    else:
+                        say(f"  Server logs are {c(32, 'ON') if _CLI_LOGS else c(31, 'OFF')}. Usage: /log on|off")
                 elif cmd in ("/clear", "cls"):
                     os.system("cls" if platform.system() == "Windows" else "clear")
                     _render_cli_banner()

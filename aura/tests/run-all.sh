@@ -7,7 +7,8 @@ echo "════ NODE (no browser needed) ════"
 for t in test-architecture test-core test-providers test-actions \
          test-live test-desktop test-router test-models test-voice-loop \
          test-gesture-wave test-desktop-tools test-vision-embeddings test-screen-agent \
-         test-gestures-cursor test-task-agent test-runtime test-privacy-guard test-dwell test-doc-agent test-sphere; do
+         test-gestures-cursor test-task-agent test-runtime test-privacy-guard test-dwell \
+         test-doc-agent test-doc-resilience test-sphere; do
   printf "  %-20s " "$t"
   node "tests/$t.mjs" | grep -oE "PASS [0-9]+" | tail -1
 done
@@ -34,6 +35,8 @@ printf "  %-20s " "test-server-concurrency"
 python3 tests/test-server-concurrency.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-docgen"
 python3 tests/test-docgen.py | grep -oE "PASS [0-9]+" | tail -1
+printf "  %-20s " "test-terminal-cli"
+python3 tests/test-terminal-cli.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-devices"
 python3 tests/test-devices.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-overlay-vdesk"
