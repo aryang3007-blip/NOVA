@@ -15,7 +15,7 @@ from faster_whisper import WhisperModel
 # NOVA — CUSTOM WAKE PHRASE TEST
 # ============================================================
 
-CONFIG_FILE = Path("wake_phrases.json")
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "voice" / "wake_phrases.json"
 
 SAMPLE_RATE = 16000
 CHANNELS = 1

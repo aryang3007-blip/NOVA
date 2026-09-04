@@ -36,7 +36,7 @@ DEFAULT_SERVER_URL = "http://127.0.0.1:8000/api/voice/wake"
 DEFAULT_STATUS_URL = "http://127.0.0.1:8000/api/voice/status"
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-CONFIG_FILE = ROOT_DIR / "wake_phrases.json"
+CONFIG_FILE = ROOT_DIR / "voice" / "wake_phrases.json"
 
 DEFAULT_CONFIG = {
     "enabled": True,

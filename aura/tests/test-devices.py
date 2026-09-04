@@ -13,7 +13,7 @@ import time
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import devices
+from server import devices
 
 PASS = FAIL = 0
 

@@ -141,5 +141,5 @@ regression assertions.
 
 ## Tests
 
-`node tests/test-models.mjs` — **106 assertions**, run against your real model
+`node ../tests/test-models.mjs` — **106 assertions**, run against your real model
 list, including a check that *every* task avoids the 20B/30B models.

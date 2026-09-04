@@ -22,7 +22,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import bridge  # noqa: E402
+from server import bridge  # noqa: E402
 
 pass_n = fail_n = 0
 

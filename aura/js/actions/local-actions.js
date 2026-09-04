@@ -140,7 +140,10 @@ export class LocalActions {
 
   /* ── document generation (pptx / xlsx / docx) ─────────────────────────── */
   docCapabilities() { return this.run('doc_capabilities', {}); }
-  docBuild(kind, spec, folder) { return this.run('doc_build', { kind, spec, folder }); }
+  /** options: {theme, transition, speed, animation, images} — feature knobs. */
+  docBuild(kind, spec, folder, options = null) {
+    return this.run('doc_build', { kind, spec, folder, options });
+  }
 
   /* ── file organiser (preview → confirm → undo) ────────────────────────── */
   organizeCapabilities() { return this.run('organize_capabilities', {}); }

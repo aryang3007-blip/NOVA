@@ -16,7 +16,7 @@ it against AURA before writing anything, because most of it already existed.
 | §20 Activity event stream | Trace, streaming live |
 | §25 Computer control | `automation.py` |
 | §26 Screen analysis | `/watch`, `/look`, 12×8 grid grounding |
-| §29–31 PPTX / XLSX / DOCX | `docbuilder.py` |
+| §29–31 PPTX / XLSX / DOCX | `services/docgen/builder.py` |
 | §41–45 QR pairing, gateway | `devices.py` |
 | §68 Demo mode | `[SIMULATED]` labelling |
 | §71 File management | `organizer.py` |
@@ -148,7 +148,7 @@ The spec is large and I did not finish it. Remaining, roughly by size:
 ## To try
 
 ```
-python serve.py --allow-actions
+python server/serve.py --allow-actions
 ```
 
 Watch the sphere while you talk to it: press the mic and it brightens, ask a

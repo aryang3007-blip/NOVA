@@ -17,7 +17,7 @@ ollama pull gemma2:2b
 
 # 2. Start AURA
 cd aura
-python serve.py --allow-actions
+python server/serve.py --allow-actions
 ```
 
 Opens `http://localhost:8000` automatically. That's it — Ollama is detected on its own.
@@ -77,7 +77,7 @@ and uses those exact strings.
 * If a configured model isn't installed, AURA **snaps to a real one and tells you**
   (`"gemma2" → "gemma2:2b"`), rather than sending a name Ollama will reject.
 * This is enforced three times: in the UI, in the provider adapter, and again in
-  `serve.py` — so a bad name physically cannot reach Ollama.
+  `server/serve.py` — so a bad name physically cannot reach Ollama.
 * Install suggestions appear **only** when you have zero models, and never affect routing.
 
 To see exactly what AURA can see:
@@ -187,14 +187,15 @@ AURA has no backend of its own and no telemetry.
 
 | File | Contents |
 |---|---|
-| **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** | **Start here for local development** |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Layered design, event flow, AI pipeline |
-| [DESKTOP_ARCHITECTURE.md](DESKTOP_ARCHITECTURE.md) | Action manager, permissions, plugins |
-| [MODELS.md](MODELS.md) | Model routing and the built-in guide |
-| [DESKTOP_CONTROL.md](DESKTOP_CONTROL.md) | **Screen, mouse & keyboard setup** — start here for automation |
-| [UI_COMMAND_CENTER.md](UI_COMMAND_CENTER.md) | Command center panels and data sources |
-| [DEPLOY.md](DEPLOY.md) | Hosting options and trade-offs |
-| [FEATURE_STATUS.md](FEATURE_STATUS.md) | Per-feature status with evidence |
+| **[DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)** | **Start here for local development** |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layered design, event flow, AI pipeline |
+| [DESKTOP_ARCHITECTURE.md](docs/DESKTOP_ARCHITECTURE.md) | Action manager, permissions, plugins |
+| [MODELS.md](docs/MODELS.md) | Model routing and the built-in guide |
+| [DESKTOP_CONTROL.md](docs/DESKTOP_CONTROL.md) | **Screen, mouse & keyboard setup** — start here for automation |
+| [UI_COMMAND_CENTER.md](docs/UI_COMMAND_CENTER.md) | Command center panels and data sources |
+| [DEPLOY.md](docs/DEPLOY.md) | Hosting options and trade-offs |
+| [FEATURE_STATUS.md](docs/FEATURE_STATUS.md) | Per-feature status with evidence |
+| [PROJECT_MAP.md](docs/PROJECT_MAP.md) | One-page index of what lives where |
 
 ## Tests
 
@@ -223,7 +224,7 @@ node tests/test-core.mjs    # no browser needed
 
 ## Optional extras
 
-AURA runs with **none** of these — `serve.py` needs only the standard library.
+AURA runs with **none** of these — `server/serve.py` needs only the standard library.
 Each unlocks one capability, and AURA says plainly when one is missing.
 
 ```bash
@@ -288,7 +289,7 @@ pull this version or run:
 
 ```powershell
 set PYTHONIOENCODING=utf-8
-python serve.py --allow-actions
+python server/serve.py --allow-actions
 ```
 
 **Windows: `ConnectionAbortedError [WinError 10053]` traceback**
@@ -312,7 +313,7 @@ headphones.
 
 **"Cannot reach Ollama … (Failed to fetch)" while Ollama is clearly running**
 
-This was a real AURA bug, fixed. `serve.py` was single-threaded, so one chat
+This was a real AURA bug, fixed. `server/serve.py` was single-threaded, so one chat
 request blocked every other request — including the status probe — until the
 browser timed out. If you still see it:
 
@@ -321,7 +322,7 @@ curl http://localhost:11434/api/tags      # is Ollama itself up?
 curl http://localhost:8000/api/ollama/status   # can AURA see it?
 ```
 If the first works and the second doesn't, restart AURA — you may be running an
-old `serve.py`. You do **not** need to set `OLLAMA_ORIGINS`.
+old `server/serve.py`. You do **not** need to set `OLLAMA_ORIGINS`.
 
 **AURA used a model I don't have / spelled the name wrong**
 

@@ -36,32 +36,32 @@ run · preserve every existing feature.
 
 ## ✅ WAVE 2 — Orchestration core (shipped)
 
-- **`js/ai/router.js`** — one authoritative provider+model resolution for
+- **../js/ai/router.js`** — one authoritative provider+model resolution for
   chat/vision/tools/docgen (`resolveChat`, `complete`, `completeJSON` with
   lenient repair + honest via-reporting). Kills the "fake selector" class of
   bug (doc-agent read `.id` off a string and always fell back offline).
-- **`js/ai/semantic-tools.js`** — unified capability registry (OS tools +
+- **../js/ai/semantic-tools.js`** — unified capability registry (OS tools +
   NOVA services: documents, research, screen, devices, tasks) with
   structured parameter descriptors; model-driven selection as the
   conversation-adjacent fallback; hallucinated tool names rejected; device
   argument kept separate from app names; `verifyAndNarrate` (no fake success).
   Weak-English/Hinglish verbs recognized (kholo, chalao, banao, dikhao…).
-- **`js/ai/context-packet.js`** — bounded per-request context: selected
+- **../js/ai/context-packet.js`** — bounded per-request context: selected
   backend, paired devices, usable tools, preference/memory rows RELEVANT to
   the request, screen/task/runtime state. Injected into the system prompt.
-- **`js/ai/engine.js`** — context packet per turn; semantic action fallback
+- **../js/ai/engine.js`** — context packet per turn; semantic action fallback
   stage; NOVA service executors (docgen / research+summary / screen inspect /
   device dispatch with honest "not paired" / task log); every agent action
   recorded as an episode (global task log).
 - **System prompt rebuilt** (IDENTITY / PRIMARY OBJECTIVE / OPERATING
   PRINCIPLES) with automatic upgrade for installs carrying the old default.
-- **`js/ai/device-router.js`** — named devices ("on Aryan's tablet"),
+- **../js/ai/device-router.js`** — named devices ("on Aryan's tablet"),
   "your/another desktop", tablet/fone variants, "phone pe/par" forms.
 - **PPT pipeline (Gamma-goal)**: doc-agent generates a structured deck spec
   (10 slide kinds, purpose per slide, speaker notes, narrative arc, audience,
   slide-count honoring, research digest for current topics) via the SELECTED
   API provider; `validateDeck` + `repairDeck` auto-fix weak slides;
-  `docbuilder.py` renders professional layouts (hero/section/two-column/
+  `services/docgen/builder.py` renders professional layouts (hero/section/two-column/
   process/timeline/stats/table/quote/conclusion/references, 4 themes) and
   re-opens the file to validate it (`validate_pptx`) before reporting success.
 - Proven by: test-router 47 (new), test-doc-agent 80, test-docgen 82, plus
@@ -95,4 +95,4 @@ run · preserve every existing feature.
 
 `test-core`, `test-architecture`, `test-actions`, `test-router`,
 `test-doc-agent`, `test-docgen`, `test-bridge-security`, `test-database`,
-`test-persistence`, plus full `tests/run-all.sh` before pushing a wave.
+`test-persistence`, plus full `../tests/run-all.sh` before pushing a wave.

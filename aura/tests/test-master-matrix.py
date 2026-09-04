@@ -28,11 +28,11 @@ try:
 except ImportError:
     np = None
 
-import windows_mgr
-import bridge
+from server import windows_mgr
+from server import bridge
 import docbuilder
-import websearch
-import devices
+from server import websearch
+from server import devices
 from voice import wake_service
 
 

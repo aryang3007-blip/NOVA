@@ -22,8 +22,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import automation          # noqa: E402
-import websearch           # noqa: E402
+from server import automation  # noqa: E402
+from server import websearch  # noqa: E402
 
 pass_n = fail_n = skip_n = 0
 
@@ -212,7 +212,7 @@ total = pass_n + fail_n
 
 # ── Arm lifetime (user-reported: "kept timing out after 15 minutes") ────
 print("\n\033[36m▸ ARM LIFETIME\033[0m")
-import automation as _auto
+from server import automation as _auto
 
 chk("default window is now an hour, not 15 min",
    _auto.ARM_TTL == 3600, f"{_auto.ARM_TTL}s")

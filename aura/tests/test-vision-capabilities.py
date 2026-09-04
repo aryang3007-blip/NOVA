@@ -1,7 +1,7 @@
 """
 AURA :: vision capability detection, in a real browser
 ======================================================
-Regression guard for the gemma4 bug (see FEATURE_STATUS.md #67/#68).
+Regression guard for the gemma4 bug (see docs/FEATURE_STATUS.md #67/#68).
 
 Needs a running AURA server AND an Ollama exposing /api/show. Start the
 reference stub first:

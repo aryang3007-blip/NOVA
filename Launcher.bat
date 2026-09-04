@@ -22,6 +22,6 @@ echo.
 echo Starting AURA on port %PORT%...
 echo.
 
-python serve.py %PORT% --allow-actions --allow-lan
+python server\serve.py %PORT% --allow-actions --allow-lan
 
 pause

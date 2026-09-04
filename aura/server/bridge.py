@@ -1149,7 +1149,7 @@ def dispatch(action, params):
     # ── desktop overlay: AURA's real, visible reticle ────────────────────
     if action.startswith("overlay_"):
         try:
-            import overlay
+            from server import overlay
         except Exception as e:
             return {"ok": False, "message": f"overlay module unavailable: {e}"}
         sub = action[len("overlay_"):]
@@ -1170,7 +1170,7 @@ def dispatch(action, params):
     # ── paired devices (phone companion) ─────────────────────────────────
     if action.startswith("device_"):
         try:
-            import devices as _dev
+            from server import devices as _dev
         except Exception as e:
             return {"ok": False, "message": f"device gateway unavailable: {e}"}
         sub = action[len("device_"):]
@@ -1189,7 +1189,7 @@ def dispatch(action, params):
     # ── window management (real OS API, never coordinates) ───────────────
     if action.startswith("window_"):
         try:
-            import windows_mgr
+            from server import windows_mgr
         except Exception as e:
             return {"ok": False, "message": f"windows_mgr unavailable: {e}"}
         sub = action[len("window_"):]
@@ -1208,7 +1208,7 @@ def dispatch(action, params):
     # ── virtual desktops (Windows) ───────────────────────────────────────
     if action.startswith("vdesk_"):
         try:
-            import vdesk
+            from server import vdesk
         except Exception as e:
             return {"ok": False, "message": f"vdesk module unavailable: {e}"}
         sub = action[len("vdesk_"):]
@@ -1255,28 +1255,30 @@ def dispatch(action, params):
         return detect_installed_apps()
 
     # ── document generation (pptx / xlsx / docx) ──────────────────────────
-    # The AI produces the OUTLINE in the browser; this only renders it. The
-    # jail resolver is injected so there is exactly one path-safety rule.
+    # The AI produces the OUTLINE (browser doc-agent, or the terminal's
+    # shared services.docgen.outline); the CANONICAL services.docgen.service
+    # renders it — same function for the app, the terminal and the tests.
+    # Options carry the feature knobs (theme/transition/animation/images),
+    # and the jail resolver is injected so there is exactly one path rule.
     if action.startswith("doc_"):
         try:
-            import docbuilder
+            from services.docgen import service as docgen_service
         except Exception as e:
-            return {"ok": False, "message": f"docbuilder unavailable: {e}"}
+            return {"ok": False, "message": f"docgen service unavailable: {e}"}
         sub = action[len("doc_"):]
         if sub == "capabilities":
-            caps = docbuilder.capabilities()
-            caps["defaultFolder"] = docbuilder.default_folder()
-            return caps
+            return docgen_service.capabilities()
         if sub == "build":
-            return docbuilder.build(p.get("kind"), p.get("spec"),
-                                    folder=p.get("folder"),
-                                    resolver=_resolve_path)
+            return docgen_service.generate(
+                p.get("kind"), p.get("spec"),
+                folder=p.get("folder"), resolver=_resolve_path,
+                options=p.get("options") or {})
         return {"ok": False, "message": f"Unknown document action '{sub}'."}
 
     # ── file organiser (preview -> confirm -> undo) ───────────────────────
     if action.startswith("organize_"):
         try:
-            import organizer
+            from server import organizer
         except Exception as e:
             return {"ok": False, "message": f"organizer unavailable: {e}"}
         sub = action[len("organize_"):]
@@ -1296,7 +1298,7 @@ def dispatch(action, params):
     # ── web search / research (offline-first: only runs when asked) ───────
     if action in ("web_search", "web_research", "web_capabilities", "read_page"):
         try:
-            import websearch
+            from server import websearch
         except Exception as e:
             return {"ok": False, "message": f"websearch module unavailable: {e}"}
         if action == "web_capabilities":
@@ -1312,7 +1314,7 @@ def dispatch(action, params):
     # ── input automation (highest risk — see automation.py) ──────────────
     if action.startswith("automation_"):
         try:
-            import automation
+            from server import automation
         except Exception as e:
             return {"ok": False, "message": f"automation module unavailable: {e}"}
         sub = action[len("automation_"):]
@@ -1333,13 +1335,13 @@ def dispatch(action, params):
     # ── window management (Win32 enumeration + window control) ───────────
     if action in ("list_windows", "window_list"):
         try:
-            import windows_mgr
+            from server import windows_mgr
             return windows_mgr.list_all_windows()
         except Exception as e:
             return {"ok": False, "message": f"windows_mgr unavailable: {e}"}
     if action == "window_action":
         try:
-            import windows_mgr
+            from server import windows_mgr
             op = p.get("op", "focus")
             wid = p.get("windowId") or p.get("hwnd")
             if op == "focus":

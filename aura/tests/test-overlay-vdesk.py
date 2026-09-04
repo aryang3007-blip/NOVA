@@ -26,9 +26,9 @@ def ok(name, cond, detail=""):
         print(f"  \033[31m✗\033[0m {name}  \033[90m{detail}\033[0m")
 
 
-import overlay
-import vdesk
-import bridge
+from server import overlay
+from server import vdesk
+from server import bridge
 
 print("\n\033[36m▸ OVERLAY — honest capability reporting\033[0m")
 caps = overlay.capabilities()

@@ -11,7 +11,7 @@ cannot be read, the panel prints **why** instead of a number.
 
 Concretely: browsers cannot read system CPU or RAM. `performance.memory` is
 the JS heap, not the machine. Rather than invent a plausible-looking gauge, I
-added a real `/api/metrics` endpoint to `serve.py` backed by **psutil**, and a
+added a real `/api/metrics` endpoint to `server/serve.py` backed by **psutil**, and a
 provider that degrades honestly:
 
 ```
@@ -74,6 +74,6 @@ they are correct even while a panel is hidden.
 
 ## Tests
 
-`python3 tests/test-command-center.py` — **54 assertions**, including a
+`python3 ../tests/test-command-center.py` — **54 assertions**, including a
 fake-data audit that greps the rendered DOM for lorem ipsum, placeholders,
 TODO markers and stub names.

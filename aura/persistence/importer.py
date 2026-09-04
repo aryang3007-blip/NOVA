@@ -22,7 +22,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 def seed_wake_phrases_from_file(file_path: Optional[Path] = None) -> int:
     """Import wake phrases from legacy wake_phrases.json if database is empty."""
-    p = file_path or (ROOT_DIR / "wake_phrases.json")
+    p = file_path or (ROOT_DIR / "voice" / "wake_phrases.json")
     if not p.exists():
         return 0
 

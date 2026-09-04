@@ -1,6 +1,6 @@
 # Screen, Mouse & Keyboard Control — Setup
 
-Everything here runs on **your** machine, via `serve.py`. Nothing is sent
+Everything here runs on **your** machine, via `server/serve.py`. Nothing is sent
 anywhere. This is the most powerful thing AURA can do, so it is deliberately
 gated at four separate points.
 
@@ -8,7 +8,7 @@ gated at four separate points.
 
 ## Why you only saw UI changes
 
-Three separate things must all be true. Running `python serve.py` alone
+Three separate things must all be true. Running `python server/serve.py` alone
 satisfies **none** of them:
 
 | # | Requirement | Symptom when missing |
@@ -31,13 +31,13 @@ Mouse and keyboard need **all three**.
 pip install pyautogui
 ```
 
-`serve.py` itself needs nothing but the standard library. This one package
+`server/serve.py` itself needs nothing but the standard library. This one package
 is what unlocks real input control.
 
 ### 2. Start with actions enabled
 
 ```
-python serve.py --allow-actions
+python server/serve.py --allow-actions
 ```
 
 Confirm the console says:
@@ -153,7 +153,7 @@ Step 1: blocked combination (alt+f4) — it can close windows or lock the machin
 - **Not verified on real hardware.** The sandbox this was developed in has
   no display, so pyautogui could not be installed there. Validation, the
   blocklist, arming and every refusal path are tested (17 assertions in
-  `tests/test-automation-ui.py`, deliberately run *without* pyautogui). The
+  `../tests/test-automation-ui.py`, deliberately run *without* pyautogui). The
   actual pixel-level clicking has only ever run on your machine — tell me
   what breaks.
 
@@ -162,7 +162,7 @@ Step 1: blocked combination (alt+f4) — it can close windows or lock the machin
 ## Troubleshooting
 
 **Badge says NOT INSTALLED**
-`pip install pyautogui`, then restart `serve.py`. Confirm with
+`pip install pyautogui`, then restart `server/serve.py`. Confirm with
 `python -c "import pyautogui; print(pyautogui.size())"`.
 
 **"No action bridge"**
@@ -177,7 +177,7 @@ physical pixels. Compare `/cursor` against the real pointer; if they
 disagree, set Scale to 100% or use `/cursor` to sample coordinates.
 
 **Nothing happens, no error**
-Check the `serve.py` console — server-side refusals are printed there.
+Check the `server/serve.py` console — server-side refusals are printed there.
 
 ---
 
@@ -306,7 +306,7 @@ Kill switch: slam the pointer into the TOP-LEFT corner.
 
 - **Grid accuracy is unmeasured on real applications.** The sandbox has no
   real desktop. Expect to tune `GRID_COLS`/`GRID_ROWS` in
-  `js/ai/screen-agent.js`. Small dense UI elements are the weak case.
+  ../js/ai/screen-agent.js`. Small dense UI elements are the weak case.
 - **Small OCR models miss things.** If `/watch ask` gives a poor answer, try
   `/screenmode vision` — slower, more accurate.
 - **No true overlay**, for the reason at the top of this section.

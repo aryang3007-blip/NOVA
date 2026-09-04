@@ -5,7 +5,7 @@
   1. Install Ollama            https://ollama.com/download
   2. ollama pull gemma2:2b
   3. pip install psutil        (optional: live CPU/RAM readings)
-  4. python serve.py --allow-actions
+  4. python server/serve.py --allow-actions
 
   Opens http://localhost:8000 automatically.
 
@@ -43,6 +43,6 @@
   0 console errors         0 circular dependencies
   0 broken imports         0 layer violations
 
-  Note: screenshots/06-camera-raw-feed.png shows a green test
+  Note: ../screenshots/06-camera-raw-feed.png shows a green test
   pattern because the cloud container had no physical camera.
   On your PC that same pipeline sees your actual webcam.

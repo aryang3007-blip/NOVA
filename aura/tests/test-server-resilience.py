@@ -54,7 +54,7 @@ def free_port():
 
 
 print("\n\033[36m▸ SOURCE GUARDS\033[0m")
-src = open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read()
+src = open(os.path.join(ROOT, "server", "serve.py"), encoding="utf-8").read()
 chk("handle_error filters ConnectionAbortedError", "ConnectionAbortedError" in src)
 chk("_json is wrapped against client disconnects",
     "_json" in src and "except (ConnectionAbortedError" in src)

@@ -18,7 +18,7 @@ pip install psutil
 ollama pull gemma2:2b
 
 cd aura
-python serve.py --allow-actions
+python server/serve.py --allow-actions
 ```
 
 Browser opens at `http://localhost:8000`.
@@ -27,8 +27,8 @@ Browser opens at `http://localhost:8000`.
 
 | Command | Chat | Camera | Ollama | Desktop control |
 |---|---|---|---|---|
-| `python serve.py` | ✅ | ✅ | ✅ | ❌ simulated |
-| `python serve.py --allow-actions` | ✅ | ✅ | ✅ | ✅ **real** |
+| `python server/serve.py` | ✅ | ✅ | ✅ | ❌ simulated |
+| `python server/serve.py --allow-actions` | ✅ | ✅ | ✅ | ✅ **real** |
 | Opening `index.html` directly | ⚠️ offline core | ❌ | ❌ | ❌ |
 
 ### First-run checklist
@@ -46,38 +46,42 @@ If something is off, type `/selftest` or ask *"nothing is working"*.
 ## 2. Project structure
 
 ```
-aura/
+../                          (this folder = aura/)
 ├── index.html              single page; all panels live here
-├── serve.py                local server + Ollama proxy + /api/metrics
-├── bridge.py               desktop action executor (allowlisted)
-├── ollama_proxy.py         same-origin Ollama forwarding
-├── jsconfig.json           checkJs type-checking config
-├── types/external.d.ts     ambient declarations for untyped externals
-│
-├── css/aura.css            all styling, 6 themes, glass HUD
-├── vendor/                 three.js + MediaPipe + models (44 MB)
-├── screenshots/            release screenshots
-│
+├── server/                 ══ Python back-end (entry + tools) ══
+│   ├── serve.py              local server + Ollama proxy + /api/metrics
+│   ├── bridge.py             desktop action executor (allowlisted)
+│   ├── ollama_proxy.py       same-origin Ollama forwarding
+│   ├── automation.py         mouse/keyboard (highest-risk file in the repo)
+│   ├── devices.py · organizer.py · overlay.py · vdesk.py
+│   ├── websearch.py          ddgs + trafilatura
+│   └── windows_mgr.py
+├── services/               ══ feature subsystems (canonical, common) ══
+│   ├── manifest.json          ONE feature/themes/transitions/animations list
+│   ├── registry.py            Python manifest reader
+│   └── docgen/                builder · images · animations · outline · service
+├── apps/                   ══ feature popup UIs (mounted by js/features/launcher) ══
+│   ├── ppt-builder/app.js     design picker → AI images → motion → deck
+│   ├── doc-builder/app.js     Word / spreadsheet
+│   └── research/app.js        live web research
 ├── js/
+│   ├── features/              registry (manifest mirror) · kit · launcher
 │   ├── core/               ← Layer 1: foundation
 │   │   ├── bus.js            event bus (54 events)
 │   │   ├── state.js          reactive store (30 keys)
 │   │   ├── config.js         persisted settings
 │   │   └── plugins.js        plugin registry
-│   │
 │   ├── memory/             ← Layer 2: services
 │   │   ├── memory-manager.js 4 memory categories
 │   │   └── storage.js        storage abstraction + vector store
 │   ├── realtime/
 │   │   └── live-data.js      weather, news, markets, wiki
-│   │
 │   ├── runtime/            ← Layer 3: local runtime
 │   │   ├── local-runtime.js  THE OS boundary
 │   │   └── hardware/         providers, registry, metrics
 │   ├── desktop/              action manager, permissions, app db
 │   │   └── plugins/          6 desktop plugins
-│   ├── actions/              serve.py bridge client
-│   │
+│   ├── actions/              server/serve.py bridge client
 │   ├── ai/                 ← Layer 4: intelligence
 │   │   ├── engine.js         orchestration, streaming
 │   │   ├── intent-router.js  7-stage priority router
@@ -87,21 +91,23 @@ aura/
 │   │   ├── local-core.js     offline reasoning
 │   │   ├── providers.js      6 provider adapters
 │   │   └── memory.js         conversation memory
-│   │
 │   ├── plugins/            ← Layer 5: capabilities
 │   ├── gestures/             gesture → action bindings
-│   │
 │   ├── ui/                 ← Layer 6: presentation
 │   ├── avatar/               3D body, head, 2D fallback
 │   ├── vision/               MediaPipe + gesture classifier
-│   ├── voice/                STT/TTS + visemes
-│   ├── ar/  audio/
 │   └── main.js             ← Layer 7: composition root
-│
-└── tests/                  52 suites, 2685 assertions
+├── voice/                    wake_service.py + wake_phrases.json
+├── persistence/              SQLite + DPAPI vault + migrations
+├── scripts/                  dev harnesses (mic/stt/wake tests)
+├── tests/                    52+ suites (./tests/run-all.sh)
+├── docs/                     this folder — everything you are reading
+├── css/ · vendor/ · screenshots/ · types/
+├── serve.py                 legacy root shim → server/serve.py (kept for `python serve.py`)
+└── docbuilder.py            legacy root shim → services/docgen/builder (same rule)
 ```
 
-**Layer rule:** a module never imports from a higher layer. Enforced by `tests/test-architecture.mjs`, which fails the build on violation.
+**Layer rule:** a module never imports from a higher layer. Enforced by `../tests/test-architecture.mjs`, which fails the build on violation.
 
 ---
 
@@ -268,7 +274,7 @@ and receives:
   "message": "Application launched successfully" }
 ```
 
-16 tools, defined in `js/ai/tools.js`. Adding one is a single entry in the `TOOLS` object.
+16 tools, defined in ../js/ai/tools.js`. Adding one is a single entry in the `TOOLS` object.
 
 ---
 
@@ -318,7 +324,7 @@ The AI and UI contain **zero** `getUserMedia`, `speechSynthesis`, or `subprocess
 
 **Transport tiers**, chosen automatically:
 - `native` — future companion (not built)
-- `bridge` — `serve.py`, real today
+- `bridge` — `server/serve.py`, real today
 - `browser` — no host process, actions simulated
 
 ### 13 permissions, denied by default
@@ -342,7 +348,7 @@ runtime.hardware.register('camera', new NativeCameraProvider(), { priority: true
 
 ## 8. Adding a provider
 
-`js/ai/providers.js` — each adapter is an async generator yielding text deltas:
+../js/ai/providers.js` — each adapter is an async generator yielding text deltas:
 
 ```js
 export const myProvider = {
@@ -381,21 +387,21 @@ export const PROVIDERS = { openai, anthropic, gemini, groq, openrouter, ollama, 
 ```bash
 ./tests/run-all.sh                 # everything (needs a running server)
 
-node tests/test-core.mjs           # 108  maths, intents, bus, memory, gestures
-node tests/test-providers.mjs      #  13  adapters vs real wire formats
-node tests/test-actions.mjs        #  27  desktop intent parsing
-node tests/test-live.mjs           #  22  live-data routing guards
-node tests/test-desktop.mjs        # 138  action manager security
-node tests/test-router.mjs         #  88  priority routing, memory, hardware
-node tests/test-models.mjs         # 106  model ceiling + built-in guide
-node tests/test-architecture.mjs   #  18  imports, cycles, layering, dead code
+node ../tests/test-core.mjs           # 108  maths, intents, bus, memory, gestures
+node ../tests/test-providers.mjs      #  13  adapters vs real wire formats
+node ../tests/test-actions.mjs        #  27  desktop intent parsing
+node ../tests/test-live.mjs           #  22  live-data routing guards
+node ../tests/test-desktop.mjs        # 138  action manager security
+node ../tests/test-router.mjs         #  88  priority routing, memory, hardware
+node ../tests/test-models.mjs         # 106  model ceiling + built-in guide
+node ../tests/test-architecture.mjs   #  18  imports, cycles, layering, dead code
 
-python tests/test-integration.py 8000    # 63  full app in Chromium
-python tests/test-command-center.py 8000 # 54  live-data panels
-python tests/test-guide.py 8000          # 19  guide with no model
-python tests/test-desktop-ui.py 8000     # 24  permission gate end-to-end
-python tests/test-body.py 8000           # 22  avatar + wardrobe + live APIs
-python tests/browser-test.py             # 70  regression suite
+python ../tests/test-integration.py 8000    # 63  full app in Chromium
+python ../tests/test-command-center.py 8000 # 54  live-data panels
+python ../tests/test-guide.py 8000          # 19  guide with no model
+python ../tests/test-desktop-ui.py 8000     # 24  permission gate end-to-end
+python ../tests/test-body.py 8000           # 22  avatar + wardrobe + live APIs
+python ../tests/browser-test.py             # 70  regression suite
 ```
 
 Type-check:
@@ -409,7 +415,7 @@ Browser tests need Playwright:
 pip install playwright && python -m playwright install chromium
 ```
 
-`tests/fake-ollama.py` simulates Ollama for testing without a real install.
+`../tests/fake-ollama.py` simulates Ollama for testing without a real install.
 
 ---
 

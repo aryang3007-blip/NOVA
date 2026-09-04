@@ -8,9 +8,9 @@ back to the code after a break.
 ## Run it
 
 ```powershell
-python serve.py                    # http://localhost:8000
-python serve.py --allow-actions    # + desktop control, web search, automation
-python serve.py --allow-actions --allow-lan   # + reachable from your phone
+python server/serve.py                    # http://localhost:8000
+python server/serve.py --allow-actions    # + desktop control, web search, automation
+python server/serve.py --allow-actions --allow-lan   # + reachable from your phone
 ```
 
 Optional Python extras (AURA runs without all of them):
@@ -32,11 +32,14 @@ pip install -r requirements.txt
 
 | File | Responsibility |
 |---|---|
-| `serve.py` | The only entry point. Static files, threaded HTTP, `/api/*` routes, the Ollama same-origin proxy, Windows console handling. |
-| `bridge.py` | Desktop executor. App launching, file system (path-jailed), terminal (policy-gated), clipboard, media keys, app detection. The security boundary. |
-| `ollama_proxy.py` | Forwards to Ollama so the browser never hits a cross-origin wall. Model discovery lives here. |
-| `websearch.py` | ddgs search → trafilatura page reading → context for the model. Adaptive depth. |
-| `automation.py` | Mouse/keyboard control. Highest-risk file in the project; read the header before touching it. |
+| `../server/serve.py` | The only entry point. Static files, threaded HTTP, `/api/*` routes, the Ollama same-origin proxy, Windows console handling. |
+| `../server/bridge.py` | Desktop executor. App launching, file system (path-jailed), terminal (policy-gated), clipboard, media keys, app detection. The security boundary. |
+| `../server/ollama_proxy.py` | Forwards to Ollama so the browser never hits a cross-origin wall. Model discovery lives here. |
+| `../server/websearch.py` | ddgs search → trafilatura page reading → context for the model. Adaptive depth. |
+| `../server/automation.py` | Mouse/keyboard control. Highest-risk file in the project; read the header before touching it. |
+| `../services/` | Feature subsystems — docgen (builder, images, animations, outline, service) + the single manifest. **The one function `docgen.service.generate(kind, spec, folder, resolver, options)` is what terminal flags, tests and the popup apps all call.** |
+| `../apps/` | Feature popup UIs (ppt-builder, doc-builder, research) mounted by `js/features/launcher.js`. |
+| `docs/` | This folder: architecture, status, guides. |
 
 **Security rule:** every dangerous decision is made server-side. The browser
 proposes, Python disposes. The AI can influence what the browser asks for, so
@@ -44,7 +47,7 @@ it must never be the thing that decides.
 
 ---
 
-## Browser side (`js/`, 56 modules)
+## Browser side (../js/`, 56 modules)
 
 ```
 core/        bus · state · config · plugins          the spine
@@ -54,7 +57,7 @@ memory/      memory-manager (4 layers) · storage (+ VectorStore w/ embeddings)
 vision/      vision (MediaPipe) · gesture-classifier · face-recognition
              dwell (state machine + target classifier) · interaction-manager
              screen-share · screen-cursor · privacy-guard
-voice/       speech (STT + TTS + viseme lip-sync, half-duplex echo guard)
+../voice/       speech (STT + TTS + viseme lip-sync, half-duplex echo guard)
 avatar/      animation-engine ← the performance, provider-independent
              providers/ builtin · gltf (VRM/GLB) · readyplayerme
              spring-bones · mtoon · outfits · avatar-manager
@@ -81,8 +84,8 @@ main.js      composition root — wires everything, owns the DOM
 
 ```bash
 ./tests/run-all.sh          # everything
-node tests/test-core.mjs    # no browser needed
-python tests/test-bridge-security.py
+node ../tests/test-core.mjs    # no browser needed
+python ../tests/test-bridge-security.py
 ```
 
 | Kind | Files | Needs |
@@ -94,8 +97,8 @@ python tests/test-bridge-security.py
 Helpers: `capture-release.py` (screenshots), `fake-ollama.py` (stub server),
 `run-all.sh`.
 
-> `tests/*.png` are debug artifacts regenerated on every run and are
-> gitignored. The committed screenshots live in `screenshots/`.
+> `../tests/*.png` are debug artifacts regenerated on every run and are
+> gitignored. The committed screenshots live in `../screenshots/`.
 
 ---
 
@@ -126,7 +129,7 @@ Common wrong guesses, to save you a search:
 - **No backend database.** All state is `localStorage` / `IndexedDB`.
 - **No API keys required.** Cloud providers are optional; Ollama is the
   default and runs locally.
-- **`vendor/`** holds three.js, MediaPipe and the glTF loaders. It is 44 MB
+- **`../vendor/`** holds three.js, MediaPipe and the glTF loaders. It is 44 MB
   and deliberately committed so AURA works fully offline.
 
 ---

@@ -90,8 +90,8 @@ happens, that's the angle.
 - **`PROJECT_MAP.md`** — a one-page index of what lives where. Every file path
   in it is programmatically verified to exist.
 - **`.gitignore`** — test artifacts, `__pycache__`, editor cruft.
-- **Removed 3 MB** of `tests/*.png` debug screenshots that are regenerated on
-  every run. Release screenshots in `screenshots/` are untouched.
+- **Removed 3 MB** of `../tests/*.png` debug screenshots that are regenerated on
+  every run. Release screenshots in `../screenshots/` are untouched.
 - **Innovations page** now marks the two ideas that shipped instead of listing
   them as future work.
 
@@ -140,7 +140,7 @@ browser (450)  browser-test 70 · test-integration 70 · test-command-center 55
 
 ```powershell
 pip install -r requirements.txt
-python serve.py --allow-actions
+python server/serve.py --allow-actions
 ```
 
 - `/look what do you see` — with the camera on and a vision model pulled

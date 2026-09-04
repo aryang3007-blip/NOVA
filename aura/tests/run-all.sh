@@ -9,7 +9,8 @@ for t in test-architecture test-core test-providers test-actions \
          test-gesture-wave test-desktop-tools test-vision-embeddings test-screen-agent \
          test-gestures-cursor test-task-agent test-runtime test-privacy-guard test-dwell \
          test-doc-agent test-doc-resilience test-sphere \
-         test-commander test-memory-recall test-avatar-import test-verify-loop; do
+         test-commander test-memory-recall test-avatar-import test-verify-loop \
+         test-feature-registry test-feature-apps; do
   printf "  %-20s " "$t"
   node "tests/$t.mjs" | grep -oE "PASS [0-9]+" | tail -1
 done
@@ -36,6 +37,8 @@ printf "  %-20s " "test-server-concurrency"
 python3 tests/test-server-concurrency.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-docgen"
 python3 tests/test-docgen.py | grep -oE "PASS [0-9]+" | tail -1
+printf "  %-20s " "test-features"
+python3 tests/test-features.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-terminal-cli"
 python3 tests/test-terminal-cli.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-devices"

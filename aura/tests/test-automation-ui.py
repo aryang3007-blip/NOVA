@@ -3,7 +3,7 @@ AURA :: input automation - commands, safety, and honest reporting
 =================================================================
 The engine (automation.py) and the Settings panel both existed, but NOTHING
 could reach automation_dry_run / automation_run - so a user could arm
-automation and then have no way to use it. See FEATURE_STATUS.md #70.
+automation and then have no way to use it. See docs/FEATURE_STATUS.md #70.
 
 Runs WITHOUT pyautogui installed, which is the point: every assertion here
 checks that AURA reports the limitation honestly instead of pretending.

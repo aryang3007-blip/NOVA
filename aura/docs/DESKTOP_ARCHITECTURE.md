@@ -21,7 +21,7 @@ registry keys, or machine-specific values are hardcoded anywhere.
               ▼
       Desktop Plugin  ──▶  AppLauncher  ──▶  backend
                                               ├─ native  (planned)
-                                              ├─ bridge  (serve.py, real today)
+                                              ├─ bridge  (server/serve.py, real today)
                                               └─ mock    (simulated, honest)
 ```
 
@@ -31,14 +31,14 @@ The AI has **no** path to the OS that skips this chain.
 
 | File | Role |
 |---|---|
-| `js/desktop/index.js` | `DesktopFramework` — assembles everything |
-| `js/desktop/permissions.js` | 13 permissions, risk tiers, deny-by-default |
-| `js/desktop/app-database.js` | 17 mock apps, aliases, cross-platform launchers |
-| `js/desktop/app-launcher.js` | `initialize/launchApp/closeApp/searchInstalledApps/getInstalledApps` |
-| `js/desktop/action-manager.js` | validation, permissions, rate limit, confirm, audit |
-| `js/desktop/plugins/index.js` | the 6 plugins |
-| `js/desktop/setup-flow.js` | 5-step first-run flow |
-| `js/ai/action-parser.js` | conversation ⇄ action routing |
+| ../js/desktop/index.js` | `DesktopFramework` — assembles everything |
+| ../js/desktop/permissions.js` | 13 permissions, risk tiers, deny-by-default |
+| ../js/desktop/app-database.js` | 17 mock apps, aliases, cross-platform launchers |
+| ../js/desktop/app-launcher.js` | `initialize/launchApp/closeApp/searchInstalledApps/getInstalledApps` |
+| ../js/desktop/action-manager.js` | validation, permissions, rate limit, confirm, audit |
+| ../js/desktop/plugins/index.js` | the 6 plugins |
+| ../js/desktop/setup-flow.js` | 5-step first-run flow |
+| ../js/ai/action-parser.js` | conversation ⇄ action routing |
 
 ## Permissions (13)
 
@@ -118,4 +118,4 @@ Every stub is marked `TODO(local)`:
 
 ## Tests
 
-`node tests/test-desktop.mjs` — **145 assertions**, including that the AI is denied without permission and allowed with it.
+`node ../tests/test-desktop.mjs` — **145 assertions**, including that the AI is denied without permission and allowed with it.

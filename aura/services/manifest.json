@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "note": "Canonical feature manifest. python (services/registry.py), the terminal (serve.py), the app UI (js/features/registry.js) and the tests read ONE source of truth: feature ids, defaults, themes, transitions, animations, image providers.",
+  "features": {
+    "pptx": {
+      "id": "pptx", "label": "PPT Builder", "icon": "📊", "service": "docgen",
+      "kind": "pptx", "ui": "ppt-builder",
+      "params": ["topic", "audience", "details", "slides", "theme",
+                 "transition", "animation", "images"],
+      "defaults": {
+        "slides": 10,
+        "theme": "professional-dark",
+        "transition": "fade",
+        "speed": "med",
+        "animation": "none",
+        "images": { "enabled": true, "count": 1, "style": "flat illustration",
+                    "provider": "gemini" }
+      }
+    },
+    "docx": {
+      "id": "docx", "label": "Word Report Builder", "icon": "📝", "service": "docgen",
+      "kind": "docx", "ui": "doc-builder",
+      "params": ["topic", "audience", "details", "sections"],
+      "defaults": { "sections": 6 }
+    },
+    "xlsx": {
+      "id": "xlsx", "label": "Spreadsheet Builder", "icon": "📈", "service": "docgen",
+      "kind": "xlsx", "ui": "doc-builder",
+      "params": ["topic", "details", "sheets"],
+      "defaults": { "sheets": 1 }
+    },
+    "research": {
+      "id": "research", "label": "Web Research", "icon": "🔎", "service": "research",
+      "ui": "research",
+      "params": ["topic", "depth", "results", "summarize"],
+      "defaults": { "depth": "adaptive", "results": 5, "summarize": true }
+    }
+  },
+  "themes": ["professional-dark", "professional-light", "academic", "minimal",
+             "holiday", "neon"],
+  "transitions": ["none", "fade", "push", "wipe", "split", "circle", "cover",
+                  "uncover", "zoom", "comb", "wheel", "plus", "random"],
+  "animations": ["none", "bounce", "float", "fade-in", "zoom-in"],
+  "imageProviders": [
+    { "id": "gemini", "label": "Google Gemini · Imagen", "kind": "imagen",
+      "model": "imagen-3.0-generate-002",
+      "note": "Needs a Gemini API key (Settings → API Keys)" },
+    { "id": "openai", "label": "OpenAI · gpt-image-1", "kind": "openai-images",
+      "model": "gpt-image-1",
+      "note": "Needs an OpenAI API key with image credit" }
+  ]
+}

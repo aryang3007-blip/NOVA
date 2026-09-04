@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import serve  # noqa: E402
+from server import serve  # noqa: E402
 from persistence.vault import CredentialManager  # noqa: E402
 
 P = F = 0

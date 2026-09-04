@@ -5,9 +5,9 @@ AURA is a desktop AI assistant with voice, vision, gestures, and device awarenes
 
 ## How to Run
 ```powershell
-python serve.py                    # http://localhost:8000
-python serve.py --allow-actions    # + desktop control, web search, automation
-python serve.py --allow-actions --allow-lan   # + reachable from your phone
+python server/serve.py                    # http://localhost:8000
+python server/serve.py --allow-actions    # + desktop control, web search, automation
+python server/serve.py --allow-actions --allow-lan   # + reachable from your phone
 ```
 
 ## Available Pages & Routes
@@ -72,11 +72,11 @@ Development and diagnostics page at `http://localhost:8000/dev`. Contains:
 
 | File | Purpose |
 |---|---|
-| `aura/js/core/config.js` | Client-side persistent config (localStorage) |
-| `aura/voice/wake_phrases.json` | Wake word phrases and settings |
-| `aura/voice/wake_service.py` | Python wake word detection service |
-| `aura/serve.py` | Main HTTP server with all API routes |
-| `aura/js/config.js` (DEFAULTS) | Default configuration values |
+| `../js/core/config.js` | Client-side persistent config (localStorage) |
+| `../voice/wake_phrases.json` | Wake word phrases and settings |
+| `../voice/wake_service.py` | Python wake word detection service |
+| `../server/serve.py` | Main HTTP server with all API routes |
+| `../js/config.js` (DEFAULTS) | Default configuration values |
 
 ## Voice System
 - **STT**: Web Speech API (Chrome/Edge/Safari) with faster-whisper fallback
@@ -87,19 +87,19 @@ Development and diagnostics page at `http://localhost:8000/dev`. Contains:
 
 ## Test Suite
 - 64 test files with 2685 assertions
-- Run all: `./tests/run-all.sh`
-- Node tests: `node tests/test-core.mjs` (no browser needed)
-- Python tests: `python tests/test-bridge-security.py`
+- Run all: `../tests/run-all.sh` (from this folder) or `tests/run-all.sh` from `aura/`
+- Node tests: `node ../tests/test-core.mjs` (no browser needed)
+- Python tests: `python ../tests/test-bridge-security.py`
 
 ## Architecture Layers
-1. **Frontend** (js/main.js, ui/, avatar/, css/) — UI, avatar, visualisations
-2. **Application Core** (js/core/, js/ai/) — bus, state, config, plugins, AI orchestration
-3. **Action/Tool** (js/desktop/action-manager.js) — schema validation, permissions, rate limits
-4. **Local Runtime** (js/runtime/) — OS boundary, hardware providers, local services
-5. **Platform** (serve.py, bridge.py) — Windows-specific implementations
+1. **Frontend** (../js/main.js, ui/, avatar/, ../css/) — UI, avatar, visualisations
+2. **Application Core** (../js/core/, ../js/ai/) — bus, state, config, plugins, AI orchestration
+3. **Action/Tool** (../js/desktop/action-manager.js) — schema validation, permissions, rate limits
+4. **Local Runtime** (../js/runtime/) — OS boundary, hardware providers, local services
+5. **Platform** (../server/serve.py, ../server/bridge.py) — Windows-specific implementations
 
 ## Security Model
-- All dangerous decisions made server-side in serve.py
+- All dangerous decisions made server-side in server/serve.py
 - Browser proposes, Python disposes
 - AI layer never imports platform code directly — goes through tool layer
 - Action bridge requires authentication token

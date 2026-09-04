@@ -3,7 +3,7 @@
 ## 1. Local (full power) — recommended
 
 ```bash
-python3 serve.py --allow-actions
+python3 server/serve.py --allow-actions
 ```
 
 Everything works: camera, mic, gestures, **Ollama with no CORS setup**, and desktop control.
@@ -30,7 +30,7 @@ npx netlify deploy --prod --dir .      # or
 npx vercel --prod
 ```
 
-**What you lose:** `serve.py` isn't running, so there is **no Ollama proxy and
+**What you lose:** `server/serve.py` isn't running, so there is **no Ollama proxy and
 no desktop control**. Users must supply an API key (the setup wizard handles
 this). Camera/mic still work because hosts serve over https.
 
@@ -52,7 +52,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY . .
 EXPOSE 8000
-CMD ["python3","serve.py","8000","--allow-lan"]
+CMD ["python3","server/serve.py","8000","--allow-lan"]
 ```
 
 ```bash

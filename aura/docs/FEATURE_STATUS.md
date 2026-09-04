@@ -71,7 +71,7 @@ Legend: 🟢 Working · 🟡 Partial (works with a stated caveat) · ⚪ Planned
 
 | Feature | Status | Evidence |
 |---|---|---|
-| Blink | 🟢 Working | Stochastic 2–7 s timer + 13 % double-blink; test measured lids reaching fully closed (1.00); see `tests/shot-blink.png` |
+| Blink | 🟢 Working | Stochastic 2–7 s timer + 13 % double-blink; test measured lids reaching fully closed (1.00); see `../tests/shot-blink.png` |
 | Idle motion | 🟢 Working | Layered sine breathing, head sway, gaze saccades every 0.8–3.4 s |
 | Lip-sync | 🟢 Working | 10-viseme set driven by TTS `boundary` events; test measured mouth height **0.060 → 0.789** on viseme input |
 | Emotions | 🟢 Working | 10 poses (brow/eye/mouth/hue), smoothly damped; test verified happy pose curve 0.63 |
@@ -100,7 +100,7 @@ Legend: 🟢 Working · 🟡 Partial (works with a stated caveat) · ⚪ Planned
 
 | Property | Status | Notes |
 |---|---|---|
-| Modular separation | 🟢 Working | `ai/ voice/ vision/ avatar/ gestures/ ar/ audio/ core/` — modules never import each other, only the bus |
+| Modular separation | 🟢 Working | `ai/ ../voice/ vision/ avatar/ gestures/ ar/ audio/ core/` — modules never import each other, only the bus |
 | Event bus | 🟢 Working | 40+ named events, error isolation, wildcard subscribers, history buffer |
 | Plugin system | 🟢 Working | **8 plugins / 24 commands**, all registered through the same public API a third party would use |
 | No hardcoded logic | 🟢 Working | Gestures, commands, themes, providers are all data-driven registries |
@@ -136,11 +136,11 @@ Legend: 🟢 Working · 🟡 Partial (works with a stated caveat) · ⚪ Planned
 
 ## 8. Desktop Control (Local Action Bridge)  — NEW
 
-Runs through `serve.py`, which executes on **your** machine. Off by default; enable with `python3 serve.py --allow-actions`.
+Runs through `server/serve.py`, which executes on **your** machine. Off by default; enable with `python3 server/serve.py --allow-actions`.
 
 | Feature | Status | Evidence |
 |---|---|---|
-| Open apps by voice/text | 🟢 Working | "open whatsapp" → real launch. Verified end-to-end: chat → intent parser → bridge → OS |
+| Open apps by ../voice/text | 🟢 Working | "open whatsapp" → real launch. Verified end-to-end: chat → intent parser → bridge → OS |
 | 18-app allowlist | 🟢 Working | WhatsApp, Telegram, Spotify, Discord, Slack, VS Code, terminal, files, YouTube, Gmail… |
 | Deep-link → binary → web fallback | 🟢 Working | Tested: GitHub app absent → opened web version, and *said so* |
 | App detection | 🟢 Working | `/apps` reports what is actually installed on your OS |
@@ -180,11 +180,11 @@ Bound to `127.0.0.1`. Random token per launch. Every action logged to your termi
 
 | Feature | Status | Evidence |
 |---|---|---|
-| **Ollama CORS fix** | 🟢 Working | Root cause of "Ollama doesn't work": page on :8000, Ollama on :11434 = cross-origin, preflight rejected unless `OLLAMA_ORIGINS` is set. AURA now proxies `/api/ollama/*` through `serve.py` → same-origin → **works with a stock install, zero config**. Verified streaming end-to-end. |
+| **Ollama CORS fix** | 🟢 Working | Root cause of "Ollama doesn't work": page on :8000, Ollama on :11434 = cross-origin, preflight rejected unless `OLLAMA_ORIGINS` is set. AURA now proxies `/api/ollama/*` through `server/serve.py` → same-origin → **works with a stock install, zero config**. Verified streaming end-to-end. |
 | First-run setup wizard | 🟢 Working | Auto-opens when no brain is configured; correctly stays hidden when one is found |
 | One-click model install | 🟢 Working | `ollama.pull()` streams NDJSON progress → live progress bar. No terminal needed. |
 | **Live model discovery (no hardcoded names)** | 🟢 Working | Every model name comes from a live `/api/tags` call — the same data `ollama list` prints. The old curated catalog was **removed**: it made AURA offer and select models the user had never pulled. `ollama.defaultModel` is `null` until discovery runs. Guarded by `test-providers` ("no invented tags hardcoded") and `test-ollama-live` (real browser, model names AURA has never seen). |
-| Wrong/misspelled model auto-correction | 🟢 Working | `resolveModel()` snaps a bad name onto a real installed one (`gemma2` → `gemma2:2b`, `coder` → `qwen2.5-coder:7b`) and always reports the substitution. Enforced again server-side in `serve.py` with an `X-AURA-Model-Note` header, so a bad name can never reach Ollama. |
+| Wrong/misspelled model auto-correction | 🟢 Working | `resolveModel()` snaps a bad name onto a real installed one (`gemma2` → `gemma2:2b`, `coder` → `qwen2.5-coder:7b`) and always reports the substitution. Enforced again server-side in `server/serve.py` with an `X-AURA-Model-Note` header, so a bad name can never reach Ollama. |
 | Install suggestions | 🟢 Working | `SUGGESTED_IF_EMPTY` is shown **only** when zero models are installed, and never participates in routing. Proven: with any model installed, `catalog()['suggested'] == []`. |
 | API-key path with live test | 🟢 Working | Pick provider → paste key → real connection test before proceeding |
 | Camera/mic diagnostics | 🟢 Working | Reports insecure context, iframe blocking, denied permission, missing device, or in-use-by-another-app — each with the fix |
@@ -268,7 +268,7 @@ See `ARCHITECTURE.md`.
 | Legacy action compatibility | 🟢 Working | Old `{action,target}` blocks still map correctly |
 | Memory: conversation | 🟢 Working | Rolling window, dropped-topic surfacing |
 | Memory: preferences | 🟢 Working | Confidence-scored; low-confidence excluded from prompts |
-| Memory: system state | 🟢 Working | Volatile by design; tracks apps/plugins/devices |
+| Memory: system state | 🟢 Working | Volatile by design; tracks ../apps/plugins/devices |
 | Memory: knowledge + vectors | 🟢 Working | `/learn` then `/recall` verified end-to-end |
 | Priority intent router | 🟢 Working | 7 stages; **MATH outranks WEB** |
 | Extended plugins (6) | 🟢 Working | Dictionary, GitHub, Space, Fun, Memory, Runtime |
@@ -350,7 +350,7 @@ Full audit before local handoff. No features added; only correctness work.
    suppressing the errors.
 4. **Audit self-corrections** — three findings were bugs in my own analysis,
    not the code: `class="tab"` also matched `tabpane`; the word "TODO" in
-   prose was treated as a marker; `js/realtime/` was mis-classified as a
+   prose was treated as a marker; ../js/realtime/` was mis-classified as a
    plugin when it is a service.
 
 ---
@@ -362,7 +362,7 @@ Rides the **existing** `EV.POINTER` stream, so it adds no camera work.
 
 | Feature | Status | Evidence |
 |---|---|---|
-| Dwell state machine (IDLE→ARMING→DWELLING→COMMITTED→COOLDOWN) | **Working** | `js/vision/dwell.js`, 91 assertions |
+| Dwell state machine (IDLE→ARMING→DWELLING→COMMITTED→COOLDOWN) | **Working** | ../js/vision/dwell.js`, 91 assertions |
 | Progress ring 0 → 25 → 50 → 75 → 100% | **Working** | painted on the vision overlay; 3242 px measured |
 | Target classifier: AURA control vs Windows desktop | **Working** | `classifyTarget()`, pure + unit-tested |
 | Click a control inside AURA | **Working** | real `MouseEvent` with real `clientX/Y`; handler proven to run |
@@ -419,8 +419,8 @@ genuinely missing; all five are now built.
 
 ### The design rule that matters
 
-**The AI writes content, never paths.** `js/ai/doc-agent.js` turns a prompt into
-a structured outline; `docbuilder.py` renders that outline to disk. A model that
+**The AI writes content, never paths.** ../js/ai/doc-agent.js` turns a prompt into
+a structured outline; `services/docgen/builder.py` renders that outline to disk. A model that
 hallucinates cannot name a file, choose a folder, or pick an extension — the
 worst it can do is write a badly-worded slide.
 
@@ -530,7 +530,7 @@ Honest list of what does **not** exist.
 > with a pointer, rather than quietly deleted.
 
 1. ✅ **BUILT** — ~~True web search~~. `websearch.py` (ddgs + trafilatura) reads
-   results back through `serve.py`. See §Web Research.
+   results back through `server/serve.py`. See §Web Research.
 2. ✅ **BUILT** — ~~Face recognition (identity)~~. 478-landmark signatures,
    enrolment with a live scan overlay, `_identifyAll()`. Never stores an image.
 3. ~~**Smart-home control**~~ — **dropped from the roadmap by decision.** It would mean a different integration per ecosystem (Hue / Home Assistant / Matter) and derail progress on the assistant itself. Kept only as an idea on the hidden Innovations page.
@@ -579,19 +579,19 @@ Being explicit rather than vague, since this is the outstanding request.
 ## Test Summary
 
 ```
-tests/test-core.mjs        108 pass   math parser, units, intents, bus, store,
+../tests/test-core.mjs        108 pass   math parser, units, intents, bus, store,
                                       plugins, memory, all 5 gesture classes
-tests/test-providers.mjs    13 pass   6 provider adapters vs real wire formats
-tests/test-actions.mjs      27 pass   desktop intent parsing, incl. 8 negatives
+../tests/test-providers.mjs    13 pass   6 provider adapters vs real wire formats
+../tests/test-actions.mjs      27 pass   desktop intent parsing, incl. 8 negatives
                                       that must NOT hijack normal chat
-tests/test-setup.py         13 pass   setup wizard, Ollama proxy streaming, model
+../tests/test-setup.py         13 pass   setup wizard, Ollama proxy streaming, model
                                       install progress, camera+mic diagnostics
-tests/test-live.mjs         22 pass   live-data intent routing + 10 negatives that
+../tests/test-live.mjs         22 pass   live-data intent routing + 10 negatives that
                                       must NOT hijack maths/units/self-questions
-tests/test-body.py          22 pass   full-body rig, bone animation, gesture arm
+../tests/test-body.py          22 pass   full-body rig, bone animation, gesture arm
                                       raises, wardrobe swap, glass UI, and REAL
                                       weather/crypto/FX/wiki/news API calls
-tests/browser-test.py       70 pass   live Chromium: boot, wizard, chat, memory,
+../tests/browser-test.py       70 pass   live Chromium: boot, wizard, chat, memory,
                                       streaming, stop/continue, 35 commands,
                                       MediaPipe, gestures→actions, avatar, AR,
                                       XSS, responsive
@@ -611,7 +611,7 @@ TOTAL                      275 pass   0 fail   0 console errors
 8. **`file://` scheme filter bypass** — `open_url` prefixed `https://` *before* checking the scheme, turning `file:///etc/passwd` into `https://file:///etc/passwd` and slipping past the block. Scheme is now validated first.
 9. **Bold markdown broke on inner `*`** — `**47 * 89 = 4,183**` rendered as literal asterisks. Rewrote the inline parser to extract code spans first, then allow lone `*` inside bold.
 10. **Stage caption dumped command output** — `/apps` spilled a 13-item list across the screen. Caption now strips markdown and suppresses anything over 240 chars.
-11. **Ollama unreachable from the browser (the big one)** — cross-origin preflight to :11434 was rejected by default installs. Now proxied same-origin through `serve.py`.
+11. **Ollama unreachable from the browser (the big one)** — cross-origin preflight to :11434 was rejected by default installs. Now proxied same-origin through `server/serve.py`.
 12. **Model install falsely reported "installed"** — prefix matching made `qwen2.5:1.5b` look present when only `qwen2.5:3b` existed. Now exact-match (or bare `:latest`).
 13. **Mic failed silently in Chrome** — `SpeechRecognition` doesn't reliably trigger the permission prompt. Now calls `getUserMedia` first and surfaces the real error.
 14. **Empty chat after skipping the wizard** — no greeting was emitted on that path. Greeting extracted to `greet()` and fired from every entry path.
@@ -628,13 +628,13 @@ TOTAL                      275 pass   0 fail   0 console errors
 
 ### Session 19 — bugs reported from real use on the user's Windows machine
 
-24. **Ollama chat blocked every other request (the actual cause of "Cannot reach Ollama … (Failed to fetch)")** — `serve.py` used a single-threaded `socketserver.TCPServer`. One `/api/ollama/chat` held the *only* server thread for the whole generation (a cold model load is routinely 20-90s), so `/api/ollama/status`, `/api/metrics` and even static files queued behind it until the browser gave up and reported `TypeError: Failed to fetch` — which AURA displayed as "Ollama is not running". **Ollama was fine the entire time; AURA's own server was the bottleneck.** Fixed with `ThreadedHTTPServer` (`ThreadingMixIn`, `daemon_threads`). Proven by `tests/test-server-concurrency.py`: against the old server a status probe took **5003 ms** while a chat streamed; against the fixed server it returns in **<2 s** (measured ~2 ms).
+24. **Ollama chat blocked every other request (the actual cause of "Cannot reach Ollama … (Failed to fetch)")** — `server/serve.py` used a single-threaded `socketserver.TCPServer`. One `/api/ollama/chat` held the *only* server thread for the whole generation (a cold model load is routinely 20-90s), so `/api/ollama/status`, `/api/metrics` and even static files queued behind it until the browser gave up and reported `TypeError: Failed to fetch` — which AURA displayed as "Ollama is not running". **Ollama was fine the entire time; AURA's own server was the bottleneck.** Fixed with `ThreadedHTTPServer` (`ThreadingMixIn`, `daemon_threads`). Proven by `../tests/test-server-concurrency.py`: against the old server a status probe took **5003 ms** while a chat streamed; against the fixed server it returns in **<2 s** (measured ~2 ms).
 
-25. **Hardcoded / misspelled Ollama model names** — `providers.js` shipped `defaultModel:'qwen2.5:3b'` and a `models[]` list; `ollama_proxy.py` shipped a `FAST_MODELS` catalog. On a machine without those exact tags AURA requested a model that did not exist, Ollama 404'd, and the failure was misreported as a connection problem. **All hardcoded names removed.** Discovery is now `/api/tags`-only.
+25. **Hardcoded / misspelled Ollama model names** — `providers.js` shipped `defaultModel:'qwen2.5:3b'` and a `models[]` list; `server/ollama_proxy.py` shipped a `FAST_MODELS` catalog. On a machine without those exact tags AURA requested a model that did not exist, Ollama 404'd, and the failure was misreported as a connection problem. **All hardcoded names removed.** Discovery is now `/api/tags`-only.
 
-26. **A wrong model name could reach Ollama** — a stale `ollamaSmallModel` in Settings was sent verbatim. Now validated against the installed list in three places: `pickOllamaModel()`, `ollama.stream()`, and finally `serve.py` itself.
+26. **A wrong model name could reach Ollama** — a stale `ollamaSmallModel` in Settings was sent verbatim. Now validated against the installed list in three places: `pickOllamaModel()`, `ollama.stream()`, and finally `server/serve.py` itself.
 
-27. **Voice feedback loop — "the app listens to what it says"** — the microphone stayed open while TTS played, so AURA transcribed its own speech through the speakers, `autoSendOnFinal` submitted it as a new question, and it answered itself forever. Fixed with three layers: **(a)** half-duplex — `main.js` stops recognition on `TTS_START` and resumes after `TTS_END`; **(b)** a hard gate dropping transcripts while `ttsSpeaking` plus a 700 ms tail for audio still leaving the speakers; **(c)** echo matching — a transcript with ≥60 % word overlap with what AURA just said is rejected. Suppression is logged, never silent. 16 assertions in `tests/test-voice-loop.mjs`.
+27. **Voice feedback loop — "the app listens to what it says"** — the microphone stayed open while TTS played, so AURA transcribed its own speech through the speakers, `autoSendOnFinal` submitted it as a new question, and it answered itself forever. Fixed with three layers: **(a)** half-duplex — `main.js` stops recognition on `TTS_START` and resumes after `TTS_END`; **(b)** a hard gate dropping transcripts while `ttsSpeaking` plus a 700 ms tail for audio still leaving the speakers; **(c)** echo matching — a transcript with ≥60 % word overlap with what AURA just said is rejected. Suppression is logged, never silent. 16 assertions in `../tests/test-voice-loop.mjs`.
 
 28. **Speech-recognition restart storm** — `onend` unconditionally restarted recognition after 260 ms. With no usable microphone this became a hot loop that pinned the CPU and left the UI stuck on "LISTENING". Now uses exponential backoff (260 ms → 2.26 s) and gives up after 6 rapid ends with an actionable message.
 
@@ -651,7 +651,7 @@ TOTAL                      275 pass   0 fail   0 console errors
 
 33. **"WebGL / WebXR always unavailable."** A reporting bug, not a capability one. The About page tested `avatarMode === '3d'`, but the default mode is `'body'` — also WebGL. It reported ✗ while the WebGL avatar was running. Now reports the real GPU capability and names the renderer. WebXR now explains *why* (no XR device / no WebXR API / insecure context) instead of implying breakage.
 
-34. **File System plugin — implemented.** `list_directory`, `read_file`, `write_file`, `open_folder` now work through `bridge.py`. Path jail: every path is `realpath`-resolved **before** the containment check (so symlinks cannot escape), restricted to the home folder, with credential paths (`.ssh`, `.aws`, `.env`, `.netrc`…) refused outright. Writes are atomic (temp + `os.replace`) and require confirmation. 512 KB read cap, 2 MB write cap.
+34. **File System plugin — implemented.** `list_directory`, `read_file`, `write_file`, `open_folder` now work through `server/bridge.py`. Path jail: every path is `realpath`-resolved **before** the containment check (so symlinks cannot escape), restricted to the home folder, with credential paths (`.ssh`, `.aws`, `.env`, `.netrc`…) refused outright. Writes are atomic (temp + `os.replace`) and require confirmation. 512 KB read cap, 2 MB write cap.
 
 35. **Terminal plugin — implemented, with the security you asked for.** Your words: *"i dont want it resetting my c:d drive."* Three layers: (a) **29 destructive patterns hard-blocked** — `rm`, `del`, `format`, `diskpart`, `shutdown`, `reg`, PowerShell `Remove-Item` / `Set-ExecutionPolicy` — these cannot run *even with `confirmed=True`*; (b) shell metacharacters (`; & | > \` $`) rejected, so nothing can be chained onto a safe command; (c) everything runs as an argv array with `shell=False`, 20 s timeout, cwd jailed. Read-only commands run freely; anything else needs explicit confirmation. **The security test caught a real bypass**: `\bInvoke-Expression\b` never matched because `\b` does not sit between "e" and "-", so two PowerShell attacks were downgraded to "needs confirmation". Fixed and covered.
 
@@ -681,7 +681,7 @@ TOTAL                      275 pass   0 fail   0 console errors
 
 ### Session 22 - Windows launch crash, echo loop, wardrobe
 
-46. **AURA would not start on Windows at all.** `python serve.py --allow-actions` died with `UnicodeEncodeError: 'charmap' codec can't encode characters in position 2-63` before binding a port. Windows consoles default to **cp1252**, which has no box-drawing (`=`) or arrow (`->`) glyphs, and the banner printed them directly. Fixed at three levels: stdout/stderr are reconfigured to UTF-8 with `errors="replace"`; `UNICODE_OK` detects whether the console can render the fancy glyphs and `glyph()` falls back to ASCII if not; `say()` wraps every print so an encoding error can never kill the process. ANSI colour is disabled on non-TTY and enabled explicitly on Windows 10+ via `SetConsoleMode`. Proven by `test-windows-console.py`, which simulates a cp1252 stream that **refuses to be reconfigured** (worst case) and asserts the banner degrades to `========` with no crash.
+46. **AURA would not start on Windows at all.** `python server/serve.py --allow-actions` died with `UnicodeEncodeError: 'charmap' codec can't encode characters in position 2-63` before binding a port. Windows consoles default to **cp1252**, which has no box-drawing (`=`) or arrow (`->`) glyphs, and the banner printed them directly. Fixed at three levels: stdout/stderr are reconfigured to UTF-8 with `errors="replace"`; `UNICODE_OK` detects whether the console can render the fancy glyphs and `glyph()` falls back to ASCII if not; `say()` wraps every print so an encoding error can never kill the process. ANSI colour is disabled on non-TTY and enabled explicitly on Windows 10+ via `SetConsoleMode`. Proven by `test-windows-console.py`, which simulates a cp1252 stream that **refuses to be reconfigured** (worst case) and asserts the banner degrades to `========` with no crash.
 
 47. **The echo loop was still open - it heard its own "Hello Commander".** The previous guard stopped recognition on TTS_START, but `SpeechRecognition.stop()` is **asynchronous**: Chrome still fires `onresult` for audio it had already buffered, and those late results arrived after `ttsSpeaking` had been cleared. Two further holes: the guard lived in `main.js`, so TTS triggered anywhere else (gesture greeting, wake-word reply, plugin) bypassed it entirely; and interim results were not gated, so the caption still flickered with echoed text. Fixed by moving half-duplex into `SpeechInput` itself, which now subscribes to TTS_START/END/INTERRUPT directly. A synchronous `muted` flag is set **before** stopping, `abort()` is used instead of `stop()` (it discards the buffer), and unmute waits out a 900 ms acoustic tail. 14 new assertions, including "late buffered result is dropped while muted".
 
@@ -692,13 +692,13 @@ TOTAL                      275 pass   0 fail   0 console errors
 
 ### Session 23 - theming engine, memory center, system merge, spring bones
 
-50. **Expanded UI theming.** A real engine in `js/ui/theming.js`, not a list of stylesheets: 10 colour presets (including a light theme), 6 background treatments, 4 HUD styles, 3 density presets, 8 live-tuned sliders (accent hue rotation, glass blur, panel opacity, glow, corner radius, text size, animation speed, background depth), custom accent colour pickers, and 7 toggleable widgets. Everything writes CSS custom properties on `<html>`, so one variable restyles the interface **and** the WebGL scene in the same frame - the avatar's ground ring and the particle field already read `--accent`. `resolveTheme()` is pure (config in, variables out), which is how every preset is unit-tested without a DOM. Values are clamped, so a corrupt config cannot produce an unusable UI. A blanket `* { transition-duration: ... !important }` was the obvious way to implement animation speed and the wrong one - it would have flattened every tuned transition in the app - so only decorative loops are scaled.
+50. **Expanded UI theming.** A real engine in ../js/ui/theming.js`, not a list of stylesheets: 10 colour presets (including a light theme), 6 background treatments, 4 HUD styles, 3 density presets, 8 live-tuned sliders (accent hue rotation, glass blur, panel opacity, glow, corner radius, text size, animation speed, background depth), custom accent colour pickers, and 7 toggleable widgets. Everything writes CSS custom properties on `<html>`, so one variable restyles the interface **and** the WebGL scene in the same frame - the avatar's ground ring and the particle field already read `--accent`. `resolveTheme()` is pure (config in, variables out), which is how every preset is unit-tested without a DOM. Values are clamped, so a corrupt config cannot produce an unusable UI. A blanket `* { transition-duration: ... !important }` was the obvious way to implement animation speed and the wrong one - it would have flattened every tuned transition in the app - so only decorative loops are scaled.
 
 51. **Memory Center (ChatGPT-style).** Settings -> MEMORY: four tabs (conversation, pinned, facts, knowledge), full-text search, inline editing, per-message delete, and **pinning**. A pinned message is exempt from trimming and always included in `window()`, so "remember this" is durable - verified by pinning a message, pushing 1,400 more through the session, and confirming the pinned text still reaches the model. Also: teach AURA a fact (stored as knowledge and recalled automatically when relevant), export everything to a text file, clear the chat, or forget everything. `ConversationMemory` and `Memory` gained `idOf/find/remove/edit/pin/search`; ids derive from the creation timestamp because array positions shift the moment trimming runs.
 
 52. **OPS and SYSTEM merged into one System Center.** They overlapped: OPS was live telemetry, SYSTEM was diagnostics and the event log - two dock buttons for one job. Now a single panel with both, and every element id preserved (`sys-readout`, `event-log`, `btn-selftest`), so `renderSysReadout()` and the log needed no changes. `openPanel('system')` is aliased to `'ops'` so plugins, tests and habit all keep working.
 
-53. **VRM spring-bone physics.** `js/avatar/spring-bones.js` gives imported avatars real secondary motion for hair, skirts and tails. Verlet integration with a hard length constraint (so bones can never stretch), stiffness pulling back to rest, gravity, drag, and sphere colliders so hair does not sink into the head. Reads the VRM extension when present - `VRMC_springBone` (1.0) or `VRM.secondaryAnimation` (0.x, including the spec's real `stiffiness` typo) - and falls back to name-based chain detection so a plain GLB gets physics too. **Fixed 60 Hz timestep**: a variable dt makes verlet springs explode on a stutter, which would look like the hair detonating; verified by driving five consecutive 2-second frames and asserting every joint stays finite. Proven to actually move: firing a wave displaces the hair tip by 0.0083 units.
+53. **VRM spring-bone physics.** ../js/avatar/spring-bones.js` gives imported avatars real secondary motion for hair, skirts and tails. Verlet integration with a hard length constraint (so bones can never stretch), stiffness pulling back to rest, gravity, drag, and sphere colliders so hair does not sink into the head. Reads the VRM extension when present - `VRMC_springBone` (1.0) or `VRM.secondaryAnimation` (0.x, including the spec's real `stiffiness` typo) - and falls back to name-based chain detection so a plain GLB gets physics too. **Fixed 60 Hz timestep**: a variable dt makes verlet springs explode on a stutter, which would look like the hair detonating; verified by driving five consecutive 2-second frames and asserting every joint stays finite. Proven to actually move: firing a wave displaces the hair tip by 0.0083 units.
 
 
 ### Session 24 - Windows runtime errors + MToon
@@ -707,7 +707,7 @@ TOTAL                      275 pass   0 fail   0 console errors
 
 55. **`ACTION get_policy` spam loop.** The console filled with `get_policy` forever. `renderDesktop()` called `renderTerminalPolicy()`, which performs a desktop **action**, and `renderDesktop` was itself bound to `desktop:action-executed` - a self-feeding loop. The policy is now cached (`_policyCache`), concurrent fetches are coalesced (`_policyPending`), and desktop redraws are debounced and skipped entirely when the pane is not visible. Measured in a real browser: **1 call at boot, still 1 after 25 action events and 5 s idle** - previously unbounded.
 
-56. **MToon cel-shading implemented.** Previously flagged as missing: a VRM rendered with standard PBR shading rather than its authored flat anime look. `js/avatar/mtoon.js` now converts materials to real toon shading - banded diffuse with a controllable shade colour, Fresnel rim light, and inverted-hull outlines - reading parameters from `VRMC_materials_mtoon` (VRM 1.0) or `VRM.materialProperties` (VRM 0.x). Toggleable and **lossless**: turning it off restores the original PBR materials rather than approximating them. A plain GLB is never silently restyled (`source: 'not-a-vrm'`) but toon can be forced. Still out of scope: MToon UV-animation, matcap spheres, multiply-blend shading textures.
+56. **MToon cel-shading implemented.** Previously flagged as missing: a VRM rendered with standard PBR shading rather than its authored flat anime look. ../js/avatar/mtoon.js` now converts materials to real toon shading - banded diffuse with a controllable shade colour, Fresnel rim light, and inverted-hull outlines - reading parameters from `VRMC_materials_mtoon` (VRM 1.0) or `VRM.materialProperties` (VRM 0.x). Toggleable and **lossless**: turning it off restores the original PBR materials rather than approximating them. A plain GLB is never silently restyled (`source: 'not-a-vrm'`) but toon can be forced. Still out of scope: MToon UV-animation, matcap spheres, multiply-blend shading textures.
 
 57. **Tested against real VRM files.** The previous flag was that spring bones were only tested against a hand-built GLB. `test-vrm-mtoon.py` now constructs genuine **VRM 1.0 and VRM 0.x** files in-browser - real `VRMC_vrm` / `VRMC_springBone` / `VRMC_materials_mtoon` blocks, and the legacy `VRM.secondaryAnimation` / `materialProperties` equivalents - by splicing extension JSON into an exported GLB and re-packing the container. Both import through the real code path: spring source reports `vrm1` / `vrm0`, the declared collider is honoured, shade colour and `shadingToony` come from the file, and the hair swings (0.0139 displacement). **A bug this caught in my own code:** outline shells were parented to the mesh they outline, so `traverse()` walked into them and recursed until "Maximum call stack size exceeded". They are siblings now.
 
@@ -720,7 +720,7 @@ TOTAL                      275 pass   0 fail   0 console errors
 
 60. **Input automation - implemented.** `automation.py` gives AURA real mouse and keyboard control via pyautogui. This is the most dangerous code in the project, so the safety model is layered and enforced **server-side**, never in the browser the AI can influence: off by default and must be **armed**; pyautogui's **FAILSAFE stays on** (slam the pointer into the top-left corner to abort instantly); a 40-step budget with no loops; typed text is data and cannot contain key combinations; a **hotkey blocklist** that refuses Alt+F4, Ctrl+Alt+Del, Win+R, Win+L and friends *even when confirmed*; every plan is described in plain English before it runs; and arming lapses after 15 minutes. **A real bug the test caught:** `_clamp_point()` returned raw coordinates when pyautogui was absent, so a plan built on a headless machine could carry negative coordinates into a later run on a real one. It now always clamps, and never to (0,0) - that corner must stay free for the failsafe.
 
-61. **`requirements.txt` added.** All four optional dependencies documented with what each unlocks. AURA still runs with none of them; `serve.py` needs only the standard library.
+61. **`requirements.txt` added.** All four optional dependencies documented with what each unlocks. AURA still runs with none of them; `server/serve.py` needs only the standard library.
 
 
 ### Session 26 - autonomous upgrade pass
@@ -733,7 +733,7 @@ TOTAL                      275 pass   0 fail   0 console errors
 
 65. **Smart-home control dropped from the roadmap** by decision - a separate integration per ecosystem (Hue / Home Assistant / Matter) for no progress on the assistant itself. It survives as an idea on the hidden Innovations page, reframed around presence sensing rather than switch flipping.
 
-66. **Project organisation.** Added `PROJECT_MAP.md` (a one-page index - every path in it is verified to exist) and `.gitignore`. Removed 3 MB of `tests/*.png` debug artifacts that are regenerated on every run. The Innovations page now marks the two ideas that shipped instead of still listing them as future work.
+66. **Project organisation.** Added `PROJECT_MAP.md` (a one-page index - every path in it is verified to exist) and `.gitignore`. Removed 3 MB of `../tests/*.png` debug artifacts that are regenerated on every run. The Innovations page now marks the two ideas that shipped instead of still listing them as future work.
 
 67. **Vision capability was guessed from the model NAME — the gemma4 bug.**
     `ollama.isVisionModel()` tested the model name against a fixed regex of
@@ -767,9 +767,9 @@ TOTAL                      275 pass   0 fail   0 console errors
       or an unverified guess, lists the unverified models, and points at
       `/pin vision <model>` rather than assuming a download is required.
 
-    Verified: 21 assertions in `tests/test-capabilities.py` (modern Ollama,
+    Verified: 21 assertions in `../tests/test-capabilities.py` (modern Ollama,
     legacy Ollama with no capabilities field, and Ollama down), plus a real
-    browser run in `tests/test-vision-capabilities.py`.
+    browser run in `../tests/test-vision-capabilities.py`.
 
 68. **`/look` picked the slowest vision model available.** The selection was
     `ollama.visionModels()[0]` - the first name **alphabetically**, from a
@@ -803,7 +803,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     `automationDryRun()` / `automationRun()`. Settings → Desktop → Input
     Automation had working ARM / DISARM / WHERE IS MY CURSOR buttons.
 
-    **Nothing called `automationRun()`.** Grepping the entire `js/` tree for
+    **Nothing called `automationRun()`.** Grepping the entire ../js/` tree for
     `automationRun|automation_run` outside `local-actions.js` returned
     nothing. A user could install pyautogui, arm automation, watch the badge
     turn ARMED — and then have no way to make AURA click or type anything.
@@ -829,7 +829,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     weakened - the server still independently requires armed + valid +
     confirmed, so a compromised page cannot skip the check.
 
-    Verified: 17 assertions in `tests/test-automation-ui.py`, run
+    Verified: 17 assertions in `../tests/test-automation-ui.py`, run
     deliberately **without pyautogui installed** to prove AURA reports the
     limitation honestly (`pip install pyautogui`) rather than pretending.
     `alt+f4` is still rejected before reaching the mouse.
@@ -844,7 +844,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     them. Typing `/` or `@` in the composer now opens a live filtered list
     built from `plugins.listCommands()` — so a plugin registered tomorrow
     appears with no change to the palette. Arrow keys move, Tab completes,
-    Esc dismisses. `js/ui/command-palette.js`.
+    Esc dismisses. ../js/ui/command-palette.js`.
 
     Only fires when the token is at the START of the input, so `3 / 4` and
     `me@example.com` never trigger it.
@@ -857,7 +857,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     the text; Tab always completes. Regression assertion added.
 
 72. **Screen awareness — Copilot-Vision-style, honestly built.**
-    `js/vision/screen-share.js` + `js/ai/screen-agent.js` + `js/plugins/screen.js`.
+    ../js/vision/screen-share.js` + ../js/ai/screen-agent.js` + ../js/plugins/screen.js`.
 
     | Command | Does |
     |---|---|
@@ -904,9 +904,9 @@ TOTAL                      275 pass   0 fail   0 console errors
     relationship to desktop pixels, so `/find` and `/do` decline and explain
     how to fix it, instead of clicking somewhere wrong.
 
-    Verified: 58 assertions in `tests/test-screen-agent.mjs` (model choice,
+    Verified: 58 assertions in `../tests/test-screen-agent.mjs` (model choice,
     mode routing, grid maths, coordinate mapping, plan-JSON extraction from
-    messy replies, intent→step resolution) and 40 in `tests/test-screen-ui.py`
+    messy replies, intent→step resolution) and 40 in `../tests/test-screen-ui.py`
     in a real browser with a synthetic capture surface — 12,703-byte JPEG
     grabbed, moondream chosen over gemma4:12b, transcription returned, the
     2B chat model answered, static-screen change score 0.
@@ -922,7 +922,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     Worse, `/find` bailed out entirely unless an entire monitor was shared,
     so on a tab or window share nothing happened at all.
 
-    Fixed with `js/vision/screen-cursor.js` — AURA's **own** soft reticle,
+    Fixed with ../js/vision/screen-cursor.js` — AURA's **own** soft reticle,
     drawn on the shared-screen preview:
     - Lives in capture-space, so it works on a tab, a window OR a full screen.
     - Never touches the real mouse. You keep control at all times.
@@ -949,7 +949,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     User: "there should be an way for me trace wht the APP is doing... like
     everything in front of me." `/watch` and `/do` were black boxes; when they
     misbehaved nothing showed which stage failed.
-    `js/core/trace.js` + `js/ui/trace-view.js` add an append-only, live
+    ../js/core/trace.js` + ../js/ui/trace-view.js` add an append-only, live
     activity log rendered in the new **SCREEN** panel. A real `/find` produces:
     ```
     /find Save                                        127ms
@@ -989,12 +989,12 @@ TOTAL                      275 pass   0 fail   0 console errors
     reveal it. All existing bindings — including the rock sign the user uses
     daily — are unchanged and asserted.
 
-    Verified: 57 assertions in `tests/test-gestures-cursor.mjs`, 31 in
-    `tests/test-screen-panel.py` (real browser).
+    Verified: 57 assertions in `../tests/test-gestures-cursor.mjs`, 31 in
+    `../tests/test-screen-panel.py` (real browser).
 
     **Not verified on real hardware:** swipe thresholds are tuned against
     synthetic motion. Real hands may need `minDistance`/`minSpeed` adjusted in
-    `js/vision/gesture-classifier.js`.
+    ../js/vision/gesture-classifier.js`.
 
 78. **Recommending moondream was a mistake, and it broke two things.**
     I told the user to `ollama pull moondream` without ever running the screen
@@ -1091,7 +1091,7 @@ TOTAL                      275 pass   0 fail   0 console errors
 
     Now handles **9 of 9** realistic shapes, and still returns `null` for a
     genuine refusal so that stays distinguishable from a parse failure.
-    `tests/fake-real-ollama.py` cycles through the messy shapes on purpose —
+    `../tests/fake-real-ollama.py` cycles through the messy shapes on purpose —
     a stub that always returns clean JSON is what hid this bug.
 
 83. **`/do close the open window` now just works, with no model at all.**
@@ -1118,7 +1118,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     returns under 15 characters it says so and names a model that works,
     rather than failing silently.
 
-    **Verified end to end for real** — `tests/test-do-e2e.py`, browser →
+    **Verified end to end for real** — `../tests/test-do-e2e.py`, browser →
     server → pyautogui with keystrokes actually dispatched:
     ```
     ✓ /do close the open window SUCCEEDS   ✅ Completed 1 step(s). 1. Press CTRL+W   20ms
@@ -1133,7 +1133,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     screen once and emits a plan, but at the moment you ask, WhatsApp is not
     on screen. There is nothing to plan against.
 
-    `js/ai/task-agent.js` implements **observe → decide ONE action → act →
+    ../js/ai/task-agent.js` implements **observe → decide ONE action → act →
     observe again**. Each iteration takes a fresh screenshot, so the agent
     sees the consequence of what it just did. That is what lets it open an
     app, wait for it, find a search box, type a name, pick a result, find the
@@ -1162,7 +1162,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     `finish`, `give_up`), `"c 4"` → `"C4"`. A click with no cell is rejected
     outright, because it is unclickable.
 
-    **Verified end to end in a browser** (`tests/test-task-e2e.py`), browser →
+    **Verified end to end in a browser** (`../tests/test-task-e2e.py`), browser →
     agent loop → server → pyautogui with keystrokes dispatched, against a stub
     that returns deliberately messy JSON:
     ```
@@ -1196,7 +1196,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     interpreted.
 
 87. **Runtime-centric architecture — the AI is now a service, not the driver.**
-    Four new subsystems in `js/runtime/`, built to make one claim enforceable:
+    Four new subsystems in ../js/runtime/`, built to make one claim enforceable:
     *the AI never manipulates the OS directly*.
 
     **`command-registry.js`** — 32 namespaced commands, each with a parameter
@@ -1235,7 +1235,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     intact.
 
     **Architecture violations caught by the existing test and fixed properly,
-    not silenced:** `js/ai/task-agent.js` was importing `js/runtime/*`
+    not silenced:** ../js/ai/task-agent.js` was importing ../js/runtime/*`
     (layer 4 reaching into layer 6) — the registry and knowledge base are now
     *injected* by the composition root. And the Dev Console's `_render*`
     methods were dispatched by computed string, making them look orphaned;
@@ -1280,7 +1280,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     **Proven, not asserted.** Run under Xvfb, captured the root window with
     ImageMagick, and counted pixels matching the reticle colour:
     **2392 with the reticle shown, 0 after `hide()`.** Screenshot:
-    `screenshots/29-desktop-reticle.png`.
+    `../screenshots/29-desktop-reticle.png`.
 
     `/find` now calls `overlay.show()` on success, so the marker appears on the
     desktop. New `/reticle [x y|test|off]` for direct control.
@@ -1310,7 +1310,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     workspace; they do not give it a second mouse. It is a real improvement,
     not the full isolation a VM would give.
 
-    Verified: 34 assertions in `tests/test-overlay-vdesk.py`, run on Linux
+    Verified: 34 assertions in `../tests/test-overlay-vdesk.py`, run on Linux
     where both are unavailable — the point being that every entry point
     refuses with a specific reason instead of pretending.
 
@@ -1336,7 +1336,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     | `/desktop` | DESKTOPS view with a visual workspace strip |
     | `/automation` | arm/disarm card with live expiry countdown |
 
-    **Glassmorphism UI** in `css/live.css`: layered translucent panels with
+    **Glassmorphism UI** in `../css/live.css`: layered translucent panels with
     `backdrop-filter`, ambient gradient orbs (cyan/purple/pink/green), SVG
     noise to kill gradient banding, cursor-tracked specular highlights,
     spring easing (`cubic-bezier(.22,1.4,.36,1)`), ripple clicks, blur-morph
@@ -1364,7 +1364,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     - It also caught `Trace` being imported from `ui/trace-view.js`, where it
       no longer lives (it moved to `core/trace.js` in v0.15).
 
-    Verified: 49 assertions in `tests/test-live-page.py` — the page renders,
+    Verified: 49 assertions in `../tests/test-live-page.py` — the page renders,
     all 7 views navigate, sharing starts and the preview draws **922 sampled
     bright pixels**, `/find` highlights exactly 1 grid cell, the mode picker
     persists to config, and the main app still registers all 71 commands with
@@ -1375,7 +1375,7 @@ TOTAL                      275 pass   0 fail   0 console errors
     plan instead of a cell. Verified with `curl` before touching product code.
 
 92. **Privacy Guard — minimise the active window when someone appears behind you.**
-    `js/vision/privacy-guard.js` + `windows_mgr.py`. Off by default,
+    ../js/vision/privacy-guard.js` + `windows_mgr.py`. Off by default,
     conservative by default, permission-gated.
 
     **It reuses the existing pipeline and adds no cost.** `vision.js` now
@@ -1418,9 +1418,9 @@ TOTAL                      275 pass   0 fail   0 console errors
     - `persistingMs` read 0 whenever frames arrived faster than the wall
       clock ticked, so the UI progress bar never moved.
 
-    Verified: 65 assertions in `tests/test-privacy-guard.mjs` (all eight
+    Verified: 65 assertions in `../tests/test-privacy-guard.mjs` (all eight
     specified scenarios plus threshold, safety and bus-isolation cases) and
-    37 in `tests/test-privacy-ui.py` in a real browser.
+    37 in `../tests/test-privacy-ui.py` in a real browser.
 
 93. **Object detection diagnosed and fixed — it was a threshold, not a bug.**
     The user reported object detection as unreliable. It was, but the model,
@@ -1472,8 +1472,8 @@ TOTAL                      275 pass   0 fail   0 console errors
     reason (*"🛡 Standing down — all 2 face(s) recognised (Aryan, Mum)"*), plus
     a link to the existing face-enrolment UI rather than a second one.
 
-    Verified — 81 assertions in `tests/test-privacy-guard.mjs`, 22 in
-    `tests/test-owner-live.py` in a real browser:
+    Verified — 81 assertions in `../tests/test-privacy-guard.mjs`, 22 in
+    `../tests/test-owner-live.py` in a real browser:
 
     | Scene | Result |
     |---|---|
@@ -1488,12 +1488,12 @@ TOTAL                      275 pass   0 fail   0 console errors
 95. **AURA Live visibility toggle.** Settings → Vision → *Show AURA Live*.
     Hides the dock entry and skips its wiring; stored as
     `config.auraLiveEnabled`. **Nothing is deleted** — `/screen`, `live.html`,
-    `live.css` and `js/live.js` are untouched, the route still returns the full
+    `live.css` and ../js/live.js` are untouched, the route still returns the full
     12,776-byte page while hidden, and re-enabling restores it unchanged.
     Asserted both ways.
 
 96. **AURA Live was broken by a one-word typo, and it was mine.**
-    `js/live.js` called `app.ai.resolveProvider?.()`. The method is
+    ../js/live.js` called `app.ai.resolveProvider?.()`. The method is
     `resolve()` — there is no `resolveProvider`. **Optional chaining made it a
     silent no-op**, so the engine never picked a provider and every
     model-backed feature on the page (ASK, FIND, ACT) reported *"No
@@ -1521,10 +1521,10 @@ TOTAL                      275 pass   0 fail   0 console errors
     Measured: 188 painted samples, 155 of them in the scan colour.
 
 98. **Device Gateway — pair a phone over the LAN.**
-    `devices.py` + `/phone` + `js/phone.js`.
+    `devices.py` + `/phone` + ../js/phone.js`.
 
     **Transport is long-polling, not WebSocket, and the reason is stated in
-    the module.** `serve.py` is stdlib-only; a WebSocket means adding a
+    the module.** `server/serve.py` is stdlib-only; a WebSocket means adding a
     dependency or hand-rolling RFC 6455 framing. Long-polling gives the same
     LAN-latency behaviour (**measured 7–17 ms**), and reconnect after a Wi-Fi
     drop is free because every poll is just another HTTP request. The
@@ -1548,8 +1548,8 @@ TOTAL                      275 pass   0 fail   0 console errors
     phone returns `offline: true` with *"last seen 46s ago"* — it never
     reports success.
 
-    Verified: 61 assertions in `tests/test-devices.py` (spec tests D, E, F, G,
-    L, M, N) and 29 in `tests/test-phone-page.py` in a real browser — pairing
+    Verified: 61 assertions in `../tests/test-devices.py` (spec tests D, E, F, G,
+    L, M, N) and 29 in `../tests/test-phone-page.py` in a real browser — pairing
     through the UI, heartbeat at 7 ms, `open_url` delivered and executed.
 
 99. **Phone camera reported honestly — four distinct causes.**
@@ -1582,7 +1582,7 @@ TOTAL                      275 pass   0 fail   0 console errors
      animation (`.panels` used to do that job), and the dock is capped at 34%
      under 900px where the sidebar is only 52dvh.
 
-     Found and measured by a new detector, `tests/find-overlaps.py`, which
+     Found and measured by a new detector, `../tests/find-overlaps.py`, which
      walks the real DOM across 3 viewports × 6 panels × trace-on/off plus all
      three standalone pages. It reported **240** collisions before, **0** after.
      Note the detector itself needed two fixes to be trustworthy: it must
@@ -1603,7 +1603,7 @@ TOTAL                      275 pass   0 fail   0 console errors
      was `elapsed >= cooldownMs || moved > reFireRadius` — with OR, time alone
      released the latch under a motionless finger. It has to be time **AND**
      distance: the fingertip must actually leave the target before that target
-     re-arms. Caught by `tests/test-dwell.mjs` before it ever ran in a browser.
+     re-arms. Caught by `../tests/test-dwell.mjs` before it ever ran in a browser.
 
      Consequence worth noting: once distance does the real work, the time
      floor should be *short*. It was lowered 900ms → 250ms, because a long

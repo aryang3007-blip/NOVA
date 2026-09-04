@@ -11,7 +11,8 @@ anything without a confirmed plan, and that the QR actually decodes.
 import os, sys, shutil, zipfile, json, time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import bridge, docbuilder, organizer, devices          # noqa: E402
+from server import bridge, organizer, devices   # noqa: E402
+import docbuilder  # noqa: E402  (legacy root shim → services.docgen.builder)
 
 P, F = [], []
 

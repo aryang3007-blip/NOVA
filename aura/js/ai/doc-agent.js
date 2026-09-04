@@ -230,7 +230,10 @@ const SYS = (kind, { slides = 0, audience = '' } = {}) => {
     + 'Reply with ONE JSON object and nothing else — no prose, no markdown fence, no explanation.\n\n'
     + `Shape: ${k.schema}\n\n`
     + `Rules: ${k.rules}\n`
-    + (slides ? `The user asked for ${slides} slides. Deliver as close to that as the content allows.\n` : '')
+    + (slides
+        ? `The user asked for ${slides} ${kind === 'pptx' ? 'slides' : 'sections'}. ` +
+          `Deliver as close to that as the content allows.\n`
+        : '')
     + (audience ? `Audience: ${audience}. Pitch vocabulary, depth and examples to them.\n` : '')
     + 'Every string must be plain text.';
 };
@@ -290,7 +293,7 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
   const usrParts = [
     `Topic: ${topic}`,
     audience ? `Audience: ${audience}` : '',
-    slides ? `Requested slide count: ${slides}` : '',
+    slides ? `Requested ${kind === 'pptx' ? 'slide' : 'section'} count: ${slides}` : '',
     details ? `Extra instructions from the user — honour every one of them: ${details}` : '',
     digest ? `\nResearch digest (ground the content in this; cite sources on the references slide):\n${digest}` : '',
     '\nProduce the JSON now.',

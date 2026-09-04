@@ -48,6 +48,8 @@ import { PrivacyGuard } from './vision/privacy-guard.js';
 import { Trace } from './core/trace.js';
 import { ScreenCursor } from './vision/screen-cursor.js';
 import { FOLLOWUP_WINDOW_MS, REARM_DELAY_MS, shouldRearmCommander, followupOpen } from './voice/commander.js';
+import { openFeature } from './features/launcher.js';
+import { parseFeatureIntent } from './features/intent.js';
 import { InteractionManager, DWELL_EV } from './vision/interaction-manager.js';
 import { TraceView } from './ui/trace-view.js';
 
@@ -622,6 +624,7 @@ class AuraApp {
       if (!text.trim()) return;
       if (config.get('autoSendOnFinal')) {
         this.voice.input.stop();
+        if (this.maybeFeatureIntent(text)) return;
         this.send(text);
       } else {
         const inp = $('input');
@@ -682,6 +685,9 @@ class AuraApp {
         // re-arm the mic once the reply finishes (one command, no re-wake).
         this._commanderPending = true;
         this.setStatus('LISTENING');
+        // Feature popups take priority over narration: same router typed
+        // and spoken commands use (maybeFeatureIntent).
+        if (this.maybeFeatureIntent(cleanCmd)) return;
         this.send(cleanCmd);
       } else {
         // Wake word only (e.g. "AURA" or "Hey Nova")
@@ -3264,6 +3270,10 @@ class AuraApp {
     if (!text) return;
     inp.value = '';
     this.autoGrow(inp);
+    // Feature popups: "create ppt on X for holiday homework" opens the PPT
+    // Builder instead of streaming a chat answer — the user picks design,
+    // length, images and motion, then AURA's subsystem builds it.
+    if (this.maybeFeatureIntent(text)) return;
     this.send(text);
   }
 
@@ -3271,6 +3281,38 @@ class AuraApp {
     this.openPanel('chat');
     this.audio.sfx('click');
     this.ai.send(text);
+  }
+
+  /**
+   * Route a direct request into a feature popup (pptx/docx/xlsx/research)
+   * if it is one. Returns true when handled. Typed + wake + STT all funnel
+   * through this one function — the "same call anywhere" rule. The phrasing
+   * rules live in js/features/intent.js (unit-tested, no duplication).
+   */
+  maybeFeatureIntent(text) {
+    const f = parseFeatureIntent(text);
+    if (!f) return false;
+    this.openFeaturePopup(f.kind, f.prefill);
+    return true;
+  }
+
+  /** Open a feature popup with shared context (engine + actions + config). */
+  async openFeaturePopup(id, prefill = {}) {
+    await openFeature(id, prefill, {
+      engine: this.ai,
+      actions: this.actions,
+      config,
+      bus,
+      toast: (t, m) => this.toast(t, m),
+      audio: this.audio,
+    });
+    // Tell the user a popup is open (voice + visible system line) so the
+    // wake-word request never ends in silence.
+    const label = { pptx: 'PPT Builder', docx: 'Word Builder', xlsx: 'Workbook Builder',
+                    research: 'Research' }[id] || 'feature';
+    this.pushSystemMessage(`🪟 ${label} is open — choose the design, length, images and motion, then generate.`);
+    this.voice.output?.speak?.(`The ${label} is open. Choose the design and I will build it.`,
+      { emotion: 'happy' });
   }
 
   autoGrow(el) {

@@ -11,7 +11,7 @@ from openwakeword.model import Model
 # NOVA MULTI-PHRASE WAKE ENGINE — STANDALONE TEST
 # ============================================================
 
-CONFIG_FILE = Path("wake_phrases.json")
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "voice" / "wake_phrases.json"
 
 # Your working USB microphone
 DEVICE_INDEX = 1

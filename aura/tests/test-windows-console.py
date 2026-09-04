@@ -40,7 +40,7 @@ print("\n\033[36m▸ SOURCE SAFETY\033[0m")
 
 # No bare print() may carry a non-ASCII literal — that is the crash pattern.
 offenders = []
-for fname in ("serve.py", "bridge.py", "ollama_proxy.py"):
+for fname in ("server/serve.py", "server/bridge.py", "server/ollama_proxy.py"):
     with open(os.path.join(ROOT, fname), encoding="utf-8") as fh:
         for i, line in enumerate(fh, 1):
             stripped = line.strip()

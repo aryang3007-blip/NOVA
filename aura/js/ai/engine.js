@@ -476,7 +476,10 @@ export class AIEngine {
           details, imageSources, research: (t) => this._researchDigest(t),
         });
         if (!o.ok) return { success: false, message: o.message || 'Outline failed.' };
-        const r = await A.docBuild(kind, o.spec, config.get('docFolder') || undefined);
+        // options (theme/transition/animation/images) flow through the same
+        // canonical docBuild — terminal flags, tests and feature apps agree.
+        const r = await A.docBuild(kind, o.spec, config.get('docFolder') || undefined,
+                                   p.options || undefined);
         if (!r?.ok) return { success: false, message: r?.message || 'Could not build the file.' };
         const extras = [];
         if (o.source === 'offline-template') {
@@ -498,9 +501,15 @@ export class AIEngine {
       }
 
       case 'research': {
-        const digest = await this._researchDigest(String(p.topic || rawInput));
+        const digest = await this._researchDigest(String(p.topic || rawInput),
+                                                  { depth: p.depth, results: p.results });
         if (!digest) {
           return { success: false, message: 'Web research is unavailable (needs the bridge with `--allow-actions` and ddgs/trafilatura installed).' };
+        }
+        // No-summary mode: the raw digest is the honest answer (feature UI
+        // checkbox "Summarize" flows straight through this flag).
+        if (p.summarize === false) {
+          return { success: true, message: digest.slice(0, 1800) };
         }
         // Summarise through the configured model — a second honest step, so
         // the spoken answer is synthesis, not a raw link dump.
@@ -562,11 +571,16 @@ export class AIEngine {
   }
 
   /** Web research through the bridge; returns a digest string or null. */
-  async _researchDigest(topic) {
+  async _researchDigest(topic, opts = {}) {
     try {
       const A = this.actions;
       if (!A?.available) return null;
-      const r = await A.run('web_research', { query: String(topic), depth: 'adaptive', maxResults: 5, readCount: 3 });
+      const r = await A.run('web_research', {
+        query: String(topic),
+        depth: opts.depth || 'adaptive',
+        maxResults: Number(opts.results) || 5,
+        readCount: 3,
+      });
       return (r?.ok && r?.context) ? String(r.context).slice(0, 2200) : null;
     } catch { return null; }
   }
@@ -646,6 +660,25 @@ export class AIEngine {
     } catch (e) {
       return { success: false, tool: spec.name, message: e.message, error: 'execution_failed' };
     }
+  }
+
+  /**
+   * Public feature-service entry — the SAME executor the semantic router,
+   * the feature popups and (through the bridge) the terminal use. The
+   * feature UI calls this; it never re-implements a service.
+   * @param {string} service  docgen | research | screen | device_action | tasks
+   * @param {object} params
+   */
+  async runService(service, params = {}) {
+    const r = await this._runNovaService({ service, parameters: params || {} },
+                                         params?.topic || params?.query || '');
+    try {
+      await this.memoryManager?.episodic?.record(
+        `${service}: ${String(r?.message || r?.summary || '').slice(0, 140)}`,
+        { why: `feature app "${service}" → ${r?.success !== false ? 'completed' : 'failed'}`,
+          source: service });
+    } catch { /* observability never blocks a feature */ }
+    return r;
   }
 
   /**

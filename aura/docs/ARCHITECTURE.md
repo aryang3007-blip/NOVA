@@ -5,30 +5,30 @@ only to the one below it, through an interface.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. FRONTEND            js/main.js · ui/ · avatar/ · css/     │
+│ 1. FRONTEND            ../js/main.js · ui/ · avatar/ · ../css/     │
 │    UI, avatar, wardrobe, visualisations, user interaction    │
 └───────────────────────────┬─────────────────────────────────┘
                             │ event bus only
 ┌───────────────────────────▼─────────────────────────────────┐
-│ 2. APPLICATION CORE    js/core/ · js/ai/ · js/memory/        │
+│ 2. APPLICATION CORE    ../js/core/ · ../js/ai/ · ../js/memory/        │
 │    bus · state · config · plugins · AI orchestration         │
 │    intent router · tool definitions · 4-part memory          │
 └───────────────────────────┬─────────────────────────────────┘
                             │ tool calls only — never OS calls
 ┌───────────────────────────▼─────────────────────────────────┐
-│ 3. ACTION / TOOL       js/desktop/action-manager.js          │
+│ 3. ACTION / TOOL       ../js/desktop/action-manager.js          │
 │    schema validation · permissions · rate limit · confirm    │
 │    · audit trail                                             │
 └───────────────────────────┬─────────────────────────────────┘
                             │ runtime API only
 ┌───────────────────────────▼─────────────────────────────────┐
-│ 4. LOCAL RUNTIME       js/runtime/                           │
+│ 4. LOCAL RUNTIME       ../js/runtime/                           │
 │    desktop framework · hardware providers · local services   │
 │    (Ollama proxy, fetch proxy, action bridge)                │
 └───────────────────────────┬─────────────────────────────────┘
                             │
 ┌───────────────────────────▼─────────────────────────────────┐
-│ 5. PLATFORM            serve.py · bridge.py · [native TODO]  │
+│ 5. PLATFORM            server/serve.py · server/bridge.py · [native TODO]  │
 │    Windows-specific implementations go here                  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -37,7 +37,7 @@ only to the one below it, through an interface.
 `speechSynthesis`, no `subprocess`. Every machine capability is reached
 through a provider or the Action Manager.
 
-## 1. Local Runtime — `js/runtime/`
+## 1. Local Runtime — ../js/runtime/`
 
 | File | Role |
 |---|---|
@@ -46,13 +46,13 @@ through a provider or the Action Manager.
 | `hardware/registry.js` | `HardwareRegistry` (provider selection) · `DeviceManager` (façade) |
 
 Transport tiers, chosen automatically: `native` (planned) → `bridge`
-(serve.py, real today) → `browser`.
+(server/serve.py, real today) → `browser`.
 
 Hardware access is permission-gated exactly like a desktop action —
 `DeviceManager.startCamera()` returns `{ok:false, reason}` when the `camera`
 permission is not granted.
 
-## 2. Tool Calling — `js/ai/tools.js`
+## 2. Tool Calling — ../js/ai/tools.js`
 
 **16 tools.** The model emits:
 
@@ -74,7 +74,7 @@ Action Manager (permissions) → `toToolResult`.
 Legacy `{action, target}` blocks still work — `normalizeToolCall` maps them
 onto the new tools, so nothing that previously functioned broke.
 
-## 3. Memory — `js/memory/`
+## 3. Memory — ../js/memory/`
 
 | Category | Class | Persistence |
 |---|---|---|
@@ -90,7 +90,7 @@ no caller changes.
 *System state is deliberately not persisted — otherwise AURA would claim an
 app is still running after a reboot.*
 
-## 4. Intent Router — `js/ai/intent-router.js`
+## 4. Intent Router — ../js/ai/intent-router.js`
 
 One ordered pipeline replaces the old first-match-wins matchers:
 
@@ -109,7 +109,7 @@ One ordered pipeline replaces the old first-match-wins matchers:
 
 `/why <text>` prints the full pipeline trace for any input.
 
-## 5. New plugins & APIs — `js/plugins/extended.js`
+## 5. New plugins & APIs — ../js/plugins/extended.js`
 
 6 plugins · 17 new commands. Every API verified CORS-enabled and keyless.
 
@@ -133,7 +133,7 @@ The project is **JavaScript ESM**, not TypeScript. `jsconfig.json` enables
 npx tsc --noEmit -p jsconfig.json     # 0 errors
 ```
 
-`types/external.d.ts` declares APIs that exist at runtime but are missing from
+`../types/external.d.ts` declares APIs that exist at runtime but are missing from
 TypeScript's DOM lib (WebXR, prefixed AudioContext, Web Speech,
 `performance.memory`) plus the vendored three.js / MediaPipe bundles. AURA
 feature-detects all of them before use, so the declarations are accurate
@@ -144,7 +144,7 @@ source.
 
 ## Enforcement
 
-`tests/test-architecture.mjs` fails the build on architectural drift:
+`../tests/test-architecture.mjs` fails the build on architectural drift:
 
 | Check | Guarantee |
 |---|---|
