@@ -41,6 +41,47 @@
 import * as router from './router.js';
 import { config } from '../core/config.js';
 
+/**
+ * Spend ledger helpers (Keys & Spend panel). The ledger lives in the local
+ * SQLite DB; these fire-and-forget and NEVER break generation.
+ */
+async function _pc() {
+  try { return (await import('../core/persistence-client.js')).persistenceClient; }
+  catch { return null; }
+}
+
+export async function usageSnapshot() {
+  const pc = await _pc();
+  try { return (await pc?.getUsageSummary?.()) || null; } catch { return null; }
+}
+
+export async function logUsage({ provider = '?', model = '', kind = 'chat',
+                                 status = 'ok', detail = '' } = {}) {
+  const pc = await _pc();
+  try { await pc?.logUsage?.({ provider, model, kind, status, detail }); } catch {}
+}
+
+/** Pure budget decision (unit-testable): {allowed, used, cap, message}. */
+export function computeUsageGuard(snapshot, kind = 'chat') {
+  const budget = snapshot?.budget || {};
+  if (!budget.enabled) return { allowed: true, used: 0, cap: 0, message: '' };
+  const isImage = kind === 'image';
+  const cap = Number(isImage ? budget.imagesPerDay : budget.requestsPerDay) || 0;
+  const used = Number(isImage ? snapshot?.today?.images : snapshot?.today?.total) || 0;
+  const allowed = cap <= 0 || used < cap;
+  return {
+    allowed, used, cap,
+    message: allowed ? ''
+      : `daily ${isImage ? 'image' : 'request'} budget reached (${used}/${cap}) — `
+        + 'nothing was sent. Raise it in Settings → Keys & Spend, or wait until tomorrow.',
+  };
+}
+
+/** Daily budget check — returns {allowed, used, cap, message}. */
+export async function usageGuard(kind = 'chat') {
+  return computeUsageGuard(await usageSnapshot(), kind);
+}
+
 /** Document kinds and how to ask a model for each. */
 export const DOC_KINDS = {
   pptx: {
@@ -309,6 +350,15 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
     ? ` ${behind.reason}`
     : '';
 
+  // Spend guard BEFORE the wire: whether the keyed outline call is allowed
+  // today (daily request budget from Keys & Spend). Never wastes a call.
+  const guard = await usageGuard('outline');
+  if (!guard.allowed) {
+    logUsage({ provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
+               kind: 'outline', status: 'blocked', detail: guard.message });
+    return { ok: false, source: 'budget', message: guard.message };
+  }
+
   const prompt = buildPrompt({
     kind, topic, slides, audience, details, digest,
   });
@@ -318,11 +368,15 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
   // gemini-3.8-flash first, no matter what chat model is set. It is the
   // newest stable model; it writes json, text and image prompts. If that
   // key is missing the ladder falls back honestly (via reports it).
+  // retries: 1 → one automatic re-ask on 429/503 (quota spikes are transient).
   const r = await router.completeJSON({
     messages, engine: eng, streamFn, temperature: 0.45,
     maxTokens: kind === 'pptx' ? 8192 : 4096, timeoutMs, retries: 1,
     provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
   });
+  logUsage({ provider: r.provider || 'gemini', model: r.model || router.DOCGEN_OUTLINE_MODEL,
+             kind: 'outline', status: (r.ok && r.json) ? 'ok' : 'error',
+             detail: (r.message || '').slice(0, 140) });
 
   const attach = (s) => {
     if (kind !== 'pptx') return s;

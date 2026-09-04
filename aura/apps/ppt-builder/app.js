@@ -216,6 +216,22 @@ export async function mount({ root, meta, prefill, ctx, close }) {
   const imgModelField = field({ label: 'Image model', input: imgModel });
   imgModelField.append(imgModelNote);
   card.append(imgModelField);
+  // ── spend visibility: what is allowed TODAY, checked before every call ──
+  const quotaLine = document.createElement('div');
+  quotaLine.className = 'fk-hint';
+  card.append(quotaLine);
+  const refreshQuota = async () => {
+    try {
+      const { usageGuard, usageSnapshot } = await import('../../js/ai/doc-agent.js');
+      const [g, snap] = await Promise.all([usageGuard('image'), usageSnapshot()]);
+      if (!snap?.budget) return;
+      quotaLine.textContent = g.allowed
+        ? `Spend: ${g.used} image(s) used today of ${g.cap || 'unlimited'} — the cap is checked before every call.`
+        : `⚠ ${g.message}`;
+      quotaLine.classList.toggle('warn', !g.allowed);
+    } catch {}
+  };
+  refreshQuota();
   renderImageModels();
   if (!imgBox.cb.checked) selfHide();
   imgBox.cb.addEventListener('change', () => selfHide());

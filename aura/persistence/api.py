@@ -14,7 +14,7 @@ from .db import db_manager
 from .vault import credential_vault
 from .repositories import (
     config_repo, memory_repo, device_repo,
-    wake_repo, app_repo, permission_repo
+    wake_repo, app_repo, permission_repo, usage_repo
 )
 from .importer import import_client_storage
 
@@ -77,6 +77,17 @@ class PersistenceAPIHandler:
         if sub == "vault":
             return {"ok": True, "providers": credential_vault.list_configured_providers(),
                     "profiles": credential_vault.profile_names()}, 200
+
+        if sub == "usage":
+            limit = int(q.get("limit", 50) or 50)
+            return {"ok": True, "log": usage_repo.recent(limit)}, 200
+
+        if sub == "usage/summary":
+            limit = int(q.get("limit", 25) or 25)
+            return {"ok": True, "summary": usage_repo.summary(limit)}, 200
+
+        if sub == "usage/budget":
+            return {"ok": True, "budget": usage_repo.get_budget()}, 200
 
         if sub == "vault/profiles":
             # Metadata only — previews and lengths, never plaintext.
@@ -263,6 +274,19 @@ class PersistenceAPIHandler:
             credential_vault.set_key(prov, key, profile=prof)
             return {"ok": True, "message": f"Credential saved securely for {prov}."}, 200
 
+        if sub == "usage/log":
+            usage_repo.record(
+                provider=payload.get("provider", "?"),
+                model=payload.get("model", ""),
+                kind=payload.get("kind", "chat"),
+                status=payload.get("status", "ok"),
+                detail=payload.get("detail", ""))
+            return {"ok": True, "message": "Usage recorded."}, 200
+
+        if sub == "usage/budget":
+            budget = usage_repo.set_budget(payload.get("budget") or payload)
+            return {"ok": True, "budget": budget}, 200
+
         if sub == "backup":
             dest = payload.get("destination")
             backup_path = db_manager.backup(dest)
@@ -338,5 +362,9 @@ class PersistenceAPIHandler:
                 credential_vault.delete_key(prov, profile=prof)
                 return {"ok": True, "message": f"Credential deleted for {prov}."}, 200
             return {"ok": False, "message": "Provider is required."}, 400
+
+        if sub == "usage":
+            n = usage_repo.clear()
+            return {"ok": True, "message": f"Usage log cleared ({n} entries)."}, 200
 
         return {"ok": False, "message": f"Unknown DELETE route: {path}"}, 404

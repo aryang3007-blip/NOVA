@@ -10,9 +10,15 @@ at a temp file.
     python3 tests/test-terminal-cli.py
 """
 import io
+import os
 import sys
 import tempfile
+import urllib.error
 from pathlib import Path
+
+# ── spend-ledger isolation: budget/retry tests record usage in a temp DB ──
+_TCLI_DB = tempfile.mkdtemp(prefix="aura-cli-test-")
+os.environ["AURA_DB_PATH"] = os.path.join(_TCLI_DB, "cli.db")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from server import serve  # noqa: E402
@@ -278,6 +284,45 @@ try:
         [{"role": "user", "content": "hi"}], urlopen_fn=lambda req, timeout=300: FakeCtx(body))
     rec("gemini completion parses JSON", obj == {"title": "T", "slides": [{"title": "A"}]},
         f"{obj} {note}")
+
+    # ── quota resilience: 503 (high demand) is retried before failing ──
+    seq = [503, 200]
+    tried = []
+    def flaky(req, timeout=300):
+        code = seq.pop(0)
+        tried.append(code)
+        if code != 200:
+            raise urllib.error.HTTPError(
+                "https://x", code, "Unavailable", None,
+                io.BytesIO(b'{"error":{"message":"This model is currently experiencing '
+                           b'high demand. Spikes in demand are usually temporary. '
+                           b'Please try again later.", "status":"UNAVAILABLE"}}'))
+        return FakeCtx(body)
+    obj2, note2 = serve._cli_complete_json(
+        [{"role": "user", "content": "hi"}], urlopen_fn=flaky,
+        retries=1, retry_delay=0)
+    rec("outline 503 → retried once → real outline (the /doc high-demand log)",
+        obj2 == {"title": "T", "slides": [{"title": "A"}]} and tried == [503, 200],
+        f"tried={tried} note={note2[:60]}")
+
+    # ── spend guard: budget hit → blocked BEFORE the wire (zero attempts) ──
+    try:
+        from persistence.repositories import usage_repo as _ur
+        _old = _ur.get_budget()
+        _ur.set_budget({"enabled": True, "requestsPerDay": 1, "imagesPerDay": 0})
+        _ur.record("gemini", "gemini-3.8-flash", kind="outline", status="ok")
+        before = len(tried)
+        obj3, note3 = serve._cli_complete_json(
+            [{"role": "user", "content": "hi"}],
+            urlopen_fn=lambda req, timeout=300: FakeCtx(body),
+            retries=1, retry_delay=0)
+        rec("daily request budget hit → outline blocked, ZERO network calls",
+            obj3 is None and "budget reached" in note3 and len(tried) == before,
+            note3[:70])
+        _ur.set_budget(_old)
+    except Exception as e:
+        rec("daily request budget hit → outline blocked, ZERO network calls",
+            False, str(e))
 finally:
     serve._cli_set_api("", "")
     serve._CLI_VAT = None

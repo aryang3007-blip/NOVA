@@ -26,6 +26,7 @@ const MODAL_CSS = `
   color: var(--text, #e8eef5); border: 1px solid var(--panel-brd, rgba(148,175,205,.16));
   border-radius: 8px; padding: .5rem .6rem; font-family: var(--font, inherit); font-size: .85rem; }
 .fk-hint { font-size: .66rem; color: var(--dim, #7d8da3); margin-top: .2rem; }
+.fk-hint.warn { color: #ffc43c; }
 .fk-check { display: flex; align-items: center; gap: .5rem; font-size: .8rem; margin: .5rem 0; }
 .fk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem; }
 .fk-theme { border: 1px solid var(--panel-brd, rgba(148,175,205,.16)); border-radius: 10px;

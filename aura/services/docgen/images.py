@@ -71,6 +71,34 @@ def _prompt(style, topic_hint):
     return (base + " No text, no watermark, no logos.").strip()
 
 
+def _log_usage(provider, model, kind, status, detail=""):
+    """Spend ledger — fire-and-forget; the ledger must never break a build."""
+    try:
+        from persistence.repositories import usage_repo
+        usage_repo.record(provider, model, kind=kind, status=status,
+                          detail=str(detail or "")[:200])
+    except Exception:
+        pass
+
+
+def _budget_check(kind="image"):
+    """(allowed, info) — True when the call may proceed. Uses the budget
+    stored in the same local DB the Keys & Spend panel edits; a cap of 0
+    means unlimited. No ledger available → never block (no backend harm)."""
+    try:
+        from persistence.repositories import usage_repo
+        return usage_repo.check(kind)
+    except Exception:
+        return True, {}
+
+
+def _clip_err(text, n=110):
+    """Provider error bodies are raw JSON — turn them into one short line."""
+    s = " ".join(str(text or "").split())
+    s = s.replace('"', "'").replace("\\n", " ")
+    return s[:n] + ("…" if len(s) > n else "")
+
+
 def _save(data, outdir, mime=""):
     """Save with the right extension per the payload mime/magic bytes."""
     os.makedirs(outdir, exist_ok=True)
@@ -87,9 +115,13 @@ def _save(data, outdir, mime=""):
 
 
 def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
-             model=None, key_fn=None, urlopen_fn=None, base_override=None):
+             model=None, key_fn=None, urlopen_fn=None, base_override=None,
+             retries=1, retry_delay=1.5):
     """
     Generate ONE image with the provider's (default or explicitly chosen) model.
+    Budget: the daily image cap is checked BEFORE any network call; on 429/503
+    the call retries `retries` times (quota spikes are transient). Every call
+    lands in the usage ledger.
     Returns {ok, path?, provider?, model?, message}.
     """
     prov = next((p for p in providers() if p["id"] == provider), None)
@@ -107,71 +139,99 @@ def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
     if not key:
         return {"ok": False, "message":
                 f"no {prov['label']} key — add it in Settings → API Keys"}
+
+    # ── spend guard: block BEFORE the wire so a quota hit costs nothing ──
+    allowed, info = _budget_check("image")
+    if not allowed:
+        used, cap = info.get("used", 0), info.get("cap", 0)
+        msg = (f"daily image budget reached ({used}/{cap}) — the image was NOT "
+               f"sent. Raise the limit in Settings → Keys & Spend, or try again tomorrow.")
+        _log_usage(provider, use_model, "image", "blocked", msg)
+        return {"ok": False, "blocked": True, "message": msg,
+                "provider": provider, "model": use_model}
+
     import json
+    import time
     import urllib.error
     import urllib.request
 
     full = _prompt(style, prompt)
     mime = ""
-    try:
-        if prov["kind"] == "gemini-image":
-            url = (base_override or "https://generativelanguage.googleapis.com/v1beta") \
-                + f"/models/{use_model}:generateContent?key={key}"
-            body = json.dumps({
-                "contents": [{"parts": [{"text": full}]}],
-                "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
-            }).encode()
-            req = urllib.request.Request(url, data=body,
-                                         headers={"Content-Type": "application/json"})
-            resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
-            b64 = ""
-            for cand in resp.get("candidates") or []:
-                for part in (cand.get("content") or {}).get("parts") or []:
-                    inline = part.get("inlineData") or part.get("inline_data") or {}
-                    if inline.get("data"):
-                        b64 = inline["data"]
-                        mime = inline.get("mimeType") or inline.get("mime_type") or ""
+    last_err = ""
+    attempts = 1 + max(0, int(retries))
+    for attempt in range(attempts):
+        try:
+            if prov["kind"] == "gemini-image":
+                url = (base_override or "https://generativelanguage.googleapis.com/v1beta") \
+                    + f"/models/{use_model}:generateContent?key={key}"
+                body = json.dumps({
+                    "contents": [{"parts": [{"text": full}]}],
+                    "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+                }).encode()
+                req = urllib.request.Request(url, data=body,
+                                             headers={"Content-Type": "application/json"})
+                resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
+                b64 = ""
+                for cand in resp.get("candidates") or []:
+                    for part in (cand.get("content") or {}).get("parts") or []:
+                        inline = part.get("inlineData") or part.get("inline_data") or {}
+                        if inline.get("data"):
+                            b64 = inline["data"]
+                            mime = inline.get("mimeType") or inline.get("mime_type") or ""
+                            break
+                    if b64:
                         break
-                if b64:
-                    break
-        elif prov["kind"] == "imagen":  # legacy Imagen :predict — kept for
-            # older manifests; current manifest uses the Nano Banana family.
-            url = (base_override or "https://generativelanguage.googleapis.com/v1beta") \
-                + f"/models/{use_model}:predict?key={key}"
-            body = json.dumps({"instances": [{"prompt": full}],
-                               "parameters": {"sampleCount": 1}}).encode()
-            req = urllib.request.Request(url, data=body,
-                                         headers={"Content-Type": "application/json"})
-            resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
-            b64 = ((resp.get("predictions") or [{}])[0].get("bytesBase64Encoded") or "")
-        elif prov["kind"] == "openai-images":
-            url = "https://api.openai.com/v1/images/generations"
-            body = json.dumps({"model": use_model, "prompt": full, "n": 1,
-                               "size": "1024x1024", "response_format": "b64_json"}).encode()
-            req = urllib.request.Request(url, data=body, headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {key}"})
-            resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
-            b64 = (resp.get("data") or [{}])[0].get("b64_json") or ""
-        else:
-            return {"ok": False, "message": f"unsupported image provider kind '{prov['kind']}'"}
-    except urllib.error.HTTPError as e:
-        return {"ok": False, "message": f"{prov['label']} HTTP {e.code}: "
-                f"{e.read().decode('utf-8', 'ignore')[:160]}"}
-    except Exception as e:
-        return {"ok": False, "message": f"{prov['label']} failed: {e}"}
+            elif prov["kind"] == "imagen":  # legacy Imagen :predict — kept for
+                # older manifests; current manifest uses the Nano Banana family.
+                url = (base_override or "https://generativelanguage.googleapis.com/v1beta") \
+                    + f"/models/{use_model}:predict?key={key}"
+                body = json.dumps({"instances": [{"prompt": full}],
+                                   "parameters": {"sampleCount": 1}}).encode()
+                req = urllib.request.Request(url, data=body,
+                                             headers={"Content-Type": "application/json"})
+                resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
+                b64 = ((resp.get("predictions") or [{}])[0].get("bytesBase64Encoded") or "")
+            elif prov["kind"] == "openai-images":
+                url = "https://api.openai.com/v1/images/generations"
+                body = json.dumps({"model": use_model, "prompt": full, "n": 1,
+                                   "size": "1024x1024", "response_format": "b64_json"}).encode()
+                req = urllib.request.Request(url, data=body, headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}"})
+                resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
+                b64 = (resp.get("data") or [{}])[0].get("b64_json") or ""
+            else:
+                return {"ok": False, "message": f"unsupported image provider kind '{prov['kind']}'"}
+            break  # succeeded
+        except urllib.error.HTTPError as e:
+            last_err = f"{prov['label']} HTTP {e.code}: {_clip_err(e.read().decode('utf-8', 'ignore'))}"
+            # 429/503 are transient quota/spike errors — retry with backoff.
+            if e.code in (429, 503) and attempt < attempts - 1:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            _log_usage(provider, use_model, "image", "error", last_err)
+            return {"ok": False, "message": last_err}
+        except Exception as e:
+            last_err = f"{prov['label']} failed: {_clip_err(e)}"
+            _log_usage(provider, use_model, "image", "error", last_err)
+            return {"ok": False, "message": last_err}
 
     if not b64:
+        _log_usage(provider, use_model, "image", "error", "no image data")
         return {"ok": False, "message": f"{prov['label']} returned no image data"}
     try:
         data = base64.b64decode(b64)
     except Exception as e:
+        _log_usage(provider, use_model, "image", "error", "bad base64")
         return {"ok": False, "message": f"{prov['label']} returned bad base64: {e}"}
     if len(data) > _MAX_IMG:
+        _log_usage(provider, use_model, "image", "error", "too large")
         return {"ok": False, "message": f"generated image too large ({len(data)} bytes)"}
     try:
         path = _save(data, outdir or os.path.expanduser("~/Documents/AURA/images"), mime)
     except Exception as e:
+        _log_usage(provider, use_model, "image", "error", f"save: {e}")
         return {"ok": False, "message": f"could not save image: {e}"}
+    _log_usage(provider, use_model, "image", "ok", f"{len(data)} bytes")
     return {"ok": True, "path": path, "provider": provider, "model": use_model,
             "mime": mime or "image/png", "bytes": len(data)}

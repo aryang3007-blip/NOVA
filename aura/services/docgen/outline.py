@@ -82,10 +82,14 @@ def expand_image_markers(spec: Dict[str, Any], images_opts: Optional[Dict[str, A
     embedded, failed, map_ = [], [], {}
 
     slides = [dict(s) for s in spec.get("slides") or []]
+    attempted = set()   # slide indexes already asked the image API — a failed
+    # marker must NEVER be generated twice (that was the duplicate 429 log:
+    # marker try + auto-visual retry on the SAME slide = two billed calls).
     # 1) markers already authored by the outline
     for i, s in enumerate(slides):
         img = str(s.get("image") or "")
         if img.lower().startswith("@gen:"):
+            attempted.add(i)
             style_hint = img.split(":", 1)[1].strip() or style
             prompt = f"{s.get('title') or 'Visual'} for a deck about {topic}"
             r = images_mod.generate(prompt, style_hint, provider, outdir,
@@ -102,6 +106,8 @@ def expand_image_markers(spec: Dict[str, Any], images_opts: Optional[Dict[str, A
     for i, s in enumerate(slides):
         if made >= count:
             break
+        if i in attempted:
+            continue
         if str(s.get("kind") or "").lower() in ("image", "media") and not s.get("image"):
             prompt = f"{s.get('title') or 'Visual'} for a deck about {topic}"
             r = images_mod.generate(prompt, style, provider, outdir, model=model)

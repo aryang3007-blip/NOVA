@@ -953,6 +953,7 @@ class AuraApp {
         if (t.dataset.tab === 'appearance') this.renderAppearance();
         if (t.dataset.tab === 'memory') this.renderMemory();
         if (t.dataset.tab === 'vision') this.renderFaces();
+        if (t.dataset.tab === 'keys') this.renderKeysSpend();
         if (t.dataset.tab === 'devices') { this.refreshDevices(); this.syncDocs(); }
         if (t.dataset.tab === 'desktop') {
           this.renderWebResearch(); this.renderAutomation();
@@ -1685,6 +1686,18 @@ class AuraApp {
   /** Re-apply the whole theme from config. Cheap: it only writes CSS vars. */
   applyAppearance() {
     applyThemeVars(config.get());
+  }
+
+  /** Keys & Spend — API keys, budget, usage ledger, DB (one page). */
+  async renderKeysSpend() {
+    const host = document.querySelector('#keys-spend');
+    if (!host) return;
+    try {
+      const { renderKeysSpend } = await import('../ui/keys-spend.js');
+      await renderKeysSpend(host, { toast: (kind, msg) => this.toast(kind, msg) });
+    } catch (e) {
+      host.textContent = `Keys & Spend unavailable: ${e?.message || e}`;
+    }
   }
 
   renderAppearance() {

@@ -32,6 +32,7 @@ import platform
 import secrets
 import sys
 import threading
+import time
 import urllib.request
 import urllib.error
 import webbrowser
@@ -1293,6 +1294,14 @@ def _cli_api_stream(provider_id, messages, on_delta, max_tokens=2048, urlopen_fn
     if not key:
         return 403, (f"No {meta['label']} key in the vault. "
                      "Add it in AURA Settings → AI Core, then restart the server.")
+    allowed, info = _cli_budget_ok("chat")
+    if not allowed:
+        msg = (f"daily request budget reached ({info.get('used', 0)}/"
+               f"{info.get('cap', 0)}) — nothing was sent. Raise it in "
+               f"Settings → Keys & Spend, or wait until tomorrow.")
+        _cli_usage_log(provider_id, _CLI_API_MODEL or meta["default_model"],
+                       "chat", "blocked", msg)
+        return 429, msg
     model = _CLI_API_MODEL or meta["default_model"]
     payload, headers, url = _cli_api_request(provider_id, key, messages, model, True,
                                              max_tokens, 0.7)
@@ -1307,21 +1316,53 @@ def _cli_api_stream(provider_id, messages, on_delta, max_tokens=2048, urlopen_fn
                 delta = _cli_parse_sse_delta(line[5:].strip(), meta["kind"])
                 if delta:
                     on_delta(delta)
+        _cli_usage_log(provider_id, model, "chat", "ok")
         return 200, None
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")[:400]
+        msg = f"HTTP {e.code}: {_cli_clip(e.read().decode('utf-8', 'replace'))}"
+        _cli_usage_log(provider_id, model, "chat", "error", msg)
+        return e.code, msg
     except Exception as e:
-        return 503, f"{meta['label']} request failed: {e}"
+        msg = f"{meta['label']} request failed: {_cli_clip(e)}"
+        _cli_usage_log(provider_id, model, "chat", "error", msg)
+        return 503, msg
+
+
+def _cli_usage_log(provider, model, kind, status, detail=""):
+    """Spend ledger — fire-and-forget, never breaks generation."""
+    try:
+        from persistence.repositories import usage_repo
+        usage_repo.record(provider or "?", model or "", kind=kind,
+                          status=status, detail=str(detail or "")[:200])
+    except Exception:
+        pass
+
+
+def _cli_budget_ok(kind="chat"):
+    """(allowed, info) — daily cap checked BEFORE the wire (0 = unlimited)."""
+    try:
+        from persistence.repositories import usage_repo
+        return usage_repo.check(kind)
+    except Exception:
+        return True, {}
+
+
+def _cli_clip(text, n=140):
+    """Provider error bodies are raw JSON — one short readable line."""
+    s = " ".join(str(text or "").split()).replace("\\n", " ").replace('"', "'")
+    return s[:n] + ("…" if len(s) > n else "")
 
 
 def _cli_complete_json(messages, max_tokens=4096, timeout=300, urlopen_fn=None,
-                       provider=None, model=None):
+                       provider=None, model=None, retries=2, retry_delay=2.0):
     """
     One non-streaming completion, decoded to JSON.
     `provider`/`model` are the per-call DOCGEN PIN (the preconfigured outline
     model) — they override the chat backend for document generation, exactly
     like the app. Returns (obj|None, note); note is '' on success, else the
     TRUE cause.
+    429/503 (quota / high demand — exactly the user's logs) are retried with
+    backoff before giving up, and every attempt lands in the usage ledger.
     """
     provider = provider or _CLI_API_PROVIDER
     if provider:
@@ -1329,21 +1370,45 @@ def _cli_complete_json(messages, max_tokens=4096, timeout=300, urlopen_fn=None,
         key = _cli_vault_key(provider)
         if not key:
             return None, f"No {meta['label']} key in the vault."
+        allowed, info = _cli_budget_ok("outline")
+        if not allowed:
+            msg = (f"daily request budget reached ({info.get('used', 0)}/"
+                   f"{info.get('cap', 0)}) — the outline was NOT sent. Raise it "
+                   f"in Settings → Keys & Spend, or wait until tomorrow.")
+            _cli_usage_log(provider, model or _CLI_API_MODEL,
+                           "outline", "blocked", msg)
+            return None, msg
         model = model or _CLI_API_MODEL or meta["default_model"]
         payload, headers, url = _cli_api_request(provider, key, messages,
                                                  model, False, max_tokens, 0.45)
-        try:
-            opener = urlopen_fn or urllib.request.urlopen
-            req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
-                                         method="POST", headers=headers)
-            with opener(req, timeout=timeout) as r:
-                body = r.read().decode("utf-8", "replace")
-        except urllib.error.HTTPError as e:
-            return None, f"{meta['label']} HTTP {e.code}: {e.read().decode('utf-8','replace')[:200]}"
-        except Exception as e:
-            return None, f"{meta['label']} request failed: {e}"
-        text = _cli_api_response_text(meta["kind"], body)
-        return _cli_extract_json(text)
+        attempts = 1 + max(0, int(retries))
+        last_err = ""
+        for attempt in range(attempts):
+            try:
+                opener = urlopen_fn or urllib.request.urlopen
+                req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                             method="POST", headers=headers)
+                with opener(req, timeout=timeout) as r:
+                    body = r.read().decode("utf-8", "replace")
+                _cli_usage_log(provider, model, "outline", "ok",
+                               f"{meta['label']} · {len(body)} bytes")
+                text = _cli_api_response_text(meta["kind"], body)
+                return _cli_extract_json(text)
+            except urllib.error.HTTPError as e:
+                msg = (f"{meta['label']} HTTP {e.code}: "
+                       f"{_cli_clip(e.read().decode('utf-8', 'replace'))}")
+                last_err = msg
+                if e.code in (429, 503) and attempt < attempts - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    _cli_usage_log(provider, model, "outline", "retried", msg)
+                    continue
+                _cli_usage_log(provider, model, "outline", "error", msg)
+                return None, msg
+            except Exception as e:
+                last_err = f"{meta['label']} request failed: {_cli_clip(e)}"
+                _cli_usage_log(provider, model, "outline", "error", last_err)
+                return None, last_err
+        return None, last_err or f"{meta['label']} request failed"
     return _cli_ollama_complete(messages, max_tokens)
 
 

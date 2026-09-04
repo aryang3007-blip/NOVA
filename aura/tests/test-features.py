@@ -12,7 +12,13 @@ import base64
 import os
 import shutil
 import sys
+import tempfile
 import urllib.error
+
+# ── spend-ledger isolation: THIS suite writes its own temp DB ──────────
+# (budget/retry tests record usage — never pollute the real AURA DB).
+_FEATURES_DB = tempfile.mkdtemp(prefix="aura-features-test-")
+os.environ["AURA_DB_PATH"] = os.path.join(_FEATURES_DB, "features.db")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -37,6 +43,7 @@ def sec(t):
 
 OUT = os.path.join(os.path.expanduser("~"), "aura-feature-test-out")
 shutil.rmtree(OUT, ignore_errors=True)
+shutil.rmtree(_FEATURES_DB, ignore_errors=True)  # ledger DB was created above
 
 # ════════════════════════════════════════════════════════════ MANIFEST
 sec("ONE MANIFEST, ONE VOCABULARY")
@@ -142,6 +149,63 @@ r = images.generate("x", provider="gemini", outdir=OUT,
                     key_fn=lambda p: "k", urlopen_fn=lambda _req: BadB64())
 ok("bad base64 → honest message", not r["ok"] and "bad base64" in r["message"])
 
+# ── QUOTA / SPEND: the 429 day — budget blocks BEFORE the wire ──
+def _quota_state():
+    try:
+        from persistence.repositories import usage_repo as _ur
+        return _ur
+    except Exception:
+        return None
+
+_ur = _quota_state()
+if _ur is not None:
+    old_budget = _ur.get_budget()
+    # 1) cap hit → blocked BEFORE the wire (the 429-day protection)
+    _ur.set_budget({"enabled": True, "requestsPerDay": 0, "imagesPerDay": 1})
+    _ur.record("gemini", "gemini-3.1-flash-image", kind="image", status="ok")
+    calls2 = []
+    def _never2(_req):
+        calls2.append(1)
+        return None  # would crash if the wire were touched
+    rb = images.generate("x", provider="gemini", outdir=OUT,
+                          key_fn=lambda p: "k", urlopen_fn=_never2)
+    ok("image cap hit → blocked with the honest message, ZERO network calls",
+       rb.get("blocked") is True and "daily image budget" in rb["message"]
+       and not calls2, str(rb.get("message"))[:70])
+    # 2) unlimited for the wire tests
+    _ur.set_budget({"enabled": True, "requestsPerDay": 0, "imagesPerDay": 0})
+    _SEQ = [429, 200]
+    def _flaky(_req):
+        code = _SEQ.pop(0)
+        if code != 200:
+            raise urllib.error.HTTPError("https://x", code, "Quota",
+                                         None, __import__("io").BytesIO(
+                                             b'{"error":{"message":"You exceeded your current quota, '
+                                             b'please check your plan and billing details. For more '
+                                             b'information on this error, visit the error codes page '
+                                             b'and search for the error code in the message body."}}'))
+        b64 = base64.b64encode(b"\x89PNG\r\n\x1a\nAURA").decode()
+        class R:
+            def read(self):
+                return (b'{"candidates":[{"content":{"parts":[{"inlineData":'
+                        b'{"mimeType":"image/png","data":"' + b64.encode() + b'"}}]}}]}')
+        return R()
+    rr = images.generate("x", provider="gemini", outdir=OUT,
+                         key_fn=lambda p: "k", urlopen_fn=_flaky,
+                         retries=1, retry_delay=0)
+    ok("429 → retried once → image generated (quota spikes are transient)",
+       rr["ok"] and os.path.isfile(rr.get("path", "")), str(rr.get("message", ""))[:80])
+    _SEQ = [429, 429]
+    rr2 = images.generate("x", provider="gemini", outdir=OUT,
+                          key_fn=lambda p: "k", urlopen_fn=_flaky,
+                          retries=1, retry_delay=0)
+    ok("429 exhausted → honest SHORT error (no raw JSON dump, no double text)",
+       not rr2["ok"] and len(rr2["message"]) < 180 and '"' not in rr2["message"]
+       and rr2["message"].count("HTTP 429") == 1, rr2["message"][:120])
+    _ur.set_budget(old_budget)
+else:
+    ok("budget suite skipped (persistence unavailable) — honest", True)
+
 # expand_image_markers with a stubbed generator (no network in tests)
 _orig = images.generate
 _seen_models = []
@@ -166,6 +230,20 @@ try:
        str(_seen_models))
     spec3, e3, f3 = outline.expand_image_markers(spec, {"enabled": False}, "Mars", OUT)
     ok("images disabled → spec untouched", e3 == [] and spec3["slides"][0]["image"] == "@gen:3d render")
+
+    # ── THE duplicate-429 bug: a FAILED marker must never be asked twice ──
+    calls = []
+    def _fail_once(prompt, style, provider, outdir, model=None):
+        calls.append(model)
+        return {"ok": False, "message": "daily image budget reached (1/1)"}
+    images.generate = _fail_once
+    spec4, e4, f4 = outline.expand_image_markers(
+        {"title": "T", "slides": [{"kind": "image", "title": "P1",
+                                   "image": "@gen:photorealistic"}]},
+        {"enabled": True, "count": 5, "style": "flat illustration",
+         "provider": "gemini"}, "Mars", OUT)
+    ok("failed marker → ONE API call, no auto-visual retry (the old double-429 log)",
+       len(calls) == 1 and len(f4) == 1 and not e4, f"calls={len(calls)}")
 finally:
     images.generate = _orig
 

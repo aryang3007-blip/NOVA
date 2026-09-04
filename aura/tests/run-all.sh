@@ -44,6 +44,8 @@ printf "  %-20s " "test-features"
 python3 tests/test-features.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-terminal-cli"
 python3 tests/test-terminal-cli.py | grep -oE "PASS [0-9]+" | tail -1
+printf "  %-20s " "test-usage"
+python3 tests/test-usage.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-devices"
 python3 tests/test-devices.py | grep -oE "PASS [0-9]+" | tail -1
 printf "  %-20s " "test-overlay-vdesk"

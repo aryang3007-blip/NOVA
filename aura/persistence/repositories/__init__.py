@@ -11,6 +11,7 @@ from .device_repo import DeviceRepository, device_repo
 from .wake_repo import WakePhraseRepository, wake_repo
 from .app_repo import AppRepository, app_repo
 from .permission_repo import PermissionRepository, permission_repo
+from .usage_repo import UsageRepository, usage_repo
 
 __all__ = [
     "ConfigRepository",
@@ -25,4 +26,6 @@ __all__ = [
     "app_repo",
     "PermissionRepository",
     "permission_repo",
+    "UsageRepository",
+    "usage_repo",
 ]

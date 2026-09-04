@@ -7,7 +7,7 @@
  *   node tests/test-doc-agent.mjs
  */
 import { detectDocRequest, validateSpec, outlineFallback, describeSpec, DOC_KINDS,
-         extractImageSources, attachImages }
+         extractImageSources, attachImages, computeUsageGuard }
   from '../js/ai/doc-agent.js';
 
 let P = 0, F = 0;
@@ -244,6 +244,22 @@ S('IMAGE SOURCES — attachImages fills and appends, keeps spec intact');
 
   const nope = attachImages({ title: 'T' }, ['https://x.io/a.png']);
   ok('non-deck spec → safe no-op', nope.placed === 0);
+}
+
+S('SPEND GUARD (Keys & Spend budget) — pure decision, no network');
+{
+  const snap = { today: { total: 12, images: 4, errors: 0 }, budget: { enabled: true, requestsPerDay: 10, imagesPerDay: 5 } };
+  const g = computeUsageGuard(snap, 'outline');
+  ok('request cap hit (12/10) → blocked', g.allowed === false && g.cap === 10 && g.used === 12, JSON.stringify(g));
+  ok('blocked message names the fix', /Keys & Spend/.test(g.message), g.message);
+  const gi = computeUsageGuard(snap, 'image');
+  ok('image under cap (4/5) → allowed', gi.allowed === true && gi.used === 4);
+  const off = computeUsageGuard({ today: { total: 99 }, budget: { enabled: false } }, 'chat');
+  ok('budget disabled → never blocks', off.allowed === true);
+  const unlimited = computeUsageGuard({ today: { total: 99 }, budget: { enabled: true, requestsPerDay: 0, imagesPerDay: 0 } }, 'chat');
+  ok('cap 0 = unlimited', unlimited.allowed === true);
+  const b = computeUsageGuard({ today: { total: 5, images: 5 }, budget: { enabled: true, requestsPerDay: 0, imagesPerDay: 5 } }, 'image');
+  ok('image cap reached exactly → blocked BEFORE the wire', b.allowed === false && b.used === 5);
 }
 
 console.log(`\n  \x1b[32mPASS ${P}\x1b[0m  FAIL ${F}`);

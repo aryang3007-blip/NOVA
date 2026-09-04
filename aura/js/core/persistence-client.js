@@ -118,6 +118,71 @@ export class PersistenceClient {
     }
   }
 
+  /* ── USAGE / SPEND LEDGER ─────────────────────────────────────────── */
+
+  async getUsageSummary(limit = 25) {
+    if (!await this.isAvailable()) return null;
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/usage/summary?limit=${limit}`,
+        { cache: 'no-store' });
+      if (!res.ok) return null;
+      return (await res.json()).summary || null;
+    } catch { return null; }
+  }
+
+  async logUsage({ provider = '?', model = '', kind = 'chat', status = 'ok', detail = '' } = {}) {
+    if (!await this.isAvailable()) return false;
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/usage/log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, model, kind, status, detail }),
+      });
+      return res.ok;
+    } catch { return false; }
+  }
+
+  async clearUsage() {
+    if (!await this.isAvailable()) return false;
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/usage`, { method: 'DELETE' });
+      return res.ok;
+    } catch { return false; }
+  }
+
+  async getBudget() {
+    if (!await this.isAvailable()) return null;
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/usage/budget`, { cache: 'no-store' });
+      if (!res.ok) return null;
+      return (await res.json()).budget || null;
+    } catch { return null; }
+  }
+
+  async setBudget(budget) {
+    if (!await this.isAvailable()) return false;
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/usage/budget`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ budget }),
+      });
+      return res.ok;
+    } catch { return false; }
+  }
+
+  async backupDb() {
+    if (!await this.isAvailable()) return null;
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/backup`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) return null;
+      return (await res.json()).path || null;
+    } catch { return null; }
+  }
+
   /* ── CONVERSATION MEMORY ──────────────────────────────────────────── */
 
   async getMessages(sessionId = 'default', limit = 160) {
