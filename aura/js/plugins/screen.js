@@ -370,7 +370,7 @@ export function registerScreenPlugin(registry, ctx) {
             ? '\n\n_Built from AURA\'s offline template — no model was available._'
             : `\n\n_Outlined by ${o.source}${o.model ? ` (${o.model})` : ''}`
               + (o.source.startsWith('fallback:') ? ' — selected backend was unusable, so this one ran.' : '')
-              + '._`
+              + '._'
               + (notes.length ? `\n\n_${notes.join('. ')}._` : '');
           return `${DOC_KINDS[req.kind].icon} **${DOC_KINDS[req.kind].label} created**\n\n`
             + `${describeSpec(req.kind, o.spec)}\n\n`

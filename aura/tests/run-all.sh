@@ -15,6 +15,9 @@ for t in test-architecture test-core test-providers test-actions \
   node "tests/$t.mjs" | grep -oE "PASS [0-9]+" | tail -1
 done
 
+printf "  %-20s " "test-module-parse"
+node --experimental-vm-modules tests/test-module-parse.mjs | grep -oE "PASS [0-9]+" | tail -1
+
 PORT=8000
 if ! curl -s -o /dev/null --max-time 2 "http://localhost:$PORT/"; then
   echo ""

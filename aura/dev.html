@@ -145,6 +145,10 @@ fetch('/api/version', { cache: 'no-store' })
     document.querySelectorAll('.rel-h').forEach(h =>
       h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed')));
   })
+  .catch(e => {
+    document.getElementById('status').innerHTML =
+      `<div class="card"><div class="k">ERROR</div><div class="v bad">${esc(e.message)}</div></div>`;
+  });
 
   // ── TASK TIMELINE (episodic memory /api/db/memory/episodes) ──────────
   const tasksEl = document.getElementById('tasks');
@@ -206,10 +210,6 @@ fetch('/api/version', { cache: 'no-store' })
   }
   document.getElementById('tasks-refresh')?.addEventListener('click', loadTasks);
   loadTasks();
-  .catch(e => {
-    document.getElementById('status').innerHTML =
-      `<div class="card"><div class="k">ERROR</div><div class="v bad">${esc(e.message)}</div></div>`;
-  });
 </script>
 </body>
 </html>
