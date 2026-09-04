@@ -230,11 +230,33 @@ with zipfile.ZipFile(path) as zf:
 ok("EVERY slide part re-parses after motion (corruption guard)", True)
 ok("slide XML contains the <p:transition node", "<p:transition" in slide2)
 ok("slide XML contains <p:animEffect", "animEffect" in slide2)
-ok("animations target BULLET paragraphs (<p:ap> per bullet)",
-   '<p:ap p="1"' in slide2 and '<p:ap p="2"' in slide2, "ap targets missing")
-ok("one effect per bullet (2 bullets → 2 entrance effects)",
-   slide2.count("presetClass=\"entr\"") == 2,
+ok("animations target EVERY bullet paragraph (<p:ap p=1..3>)",
+   all(f'<p:ap p="{i}"' in slide2 for i in (1, 2, 3)), "ap targets missing")
+ok("one effect per bullet (3 bullets → 3 entrance effects, NONE skipped)",
+   slide2.count("presetClass=\"entr\"") == 3,
    str(slide2.count("presetClass=\"entr\"")))
+
+# a theme-placeholder body with an EMPTY first paragraph: skip the empty one,
+# animate the real bullets — never drop the last bullet.
+_ENTR = 'presetClass="entr"'
+_empty_lead = _slide("Lead", 3).replace(
+    '<a:p><a:r><a:t>Lead one</a:t></a:r></a:p>',
+    '<a:p><a:endParaRPr lang="en-US"/></a:p>')
+path3 = os.path.join(OUT, "fixture3.pptx")
+_fixture_pptx(path3)  # fresh, no motion yet
+import io as _io
+_buf = _io.BytesIO()
+with zipfile.ZipFile(path3) as _zi, zipfile.ZipFile(_buf, "w", zipfile.ZIP_DEFLATED) as _zo:
+    for _n in _zi.namelist():
+        _zo.writestr(_n, _empty_lead if _n == "ppt/slides/slide2.xml" else _zi.read(_n))
+with open(path3, "wb") as _fh:
+    _fh.write(_buf.getvalue())
+an3 = animations.apply_entrance(path3, "float")
+s2b = zipfile.ZipFile(path3).read("ppt/slides/slide2.xml").decode()
+ok("empty placeholder paragraph is skipped, real bullets still animate",
+   an3["applied"] == 2 and '<p:ap p="2"' in s2b and '<p:ap p="3"' in s2b
+   and '<p:ap p="1"' not in s2b and s2b.count(_ENTR) == 2,
+   f"applied={an3.get('applied')} effects={s2b.count(_ENTR)}")
 ok("title slide is untouched (skip_first)", "<p:transition" not in slide1)
 ok("_insert_ordered puts transition before timing",
    slide2.index("<p:transition") < slide2.index("</p:sld>"))

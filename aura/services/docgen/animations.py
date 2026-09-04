@@ -160,21 +160,38 @@ def apply_transitions(path, style="fade", speed="med", skip_first=True):
             "message": f"{applied} slide transition(s) {style} ({spd})"}
 
 
+def _para_targets(sp):
+    """1-based <p:ap> targets for a shape: EVERY paragraph that carries text.
+    A leading empty placeholder paragraph (common in theme placeholders) is
+    skipped, but a real bullet is never — the old 'count - 1' math silently
+    dropped the LAST bullet on textbox bodies (user: "animations don't apply
+    to the words"). If no paragraph has text, animate all of them."""
+    paras = list(sp.iter(_A + "p"))
+    if not paras:
+        return []
+    targets = []
+    for i, par in enumerate(paras):
+        texts = [t.text or "" for t in par.iter(_A + "t") if t.tag == _A + "t"]
+        if any(str(x).strip() for x in texts):
+            targets.append(i + 1)
+    return targets or [i + 1 for i in range(len(paras))]
+
+
 def _body_shape(slide_text):
     """Pick the content text shape of a slide: the <p:sp> with the most
-    <a:p> paragraphs (skips titles). Returns (shape_id, paragraph_count)."""
+    <a:p> paragraphs (skips titles). Returns (shape_id, ap_targets)."""
     try:
         root = ET.fromstring(slide_text.encode("utf-8"))
     except Exception:
-        return None, 0
-    best, best_n = None, 1
+        return None, []
+    best, best_t = None, []
     for sp in root.iter(_P + "sp"):
-        paras = list(sp.iter(_A + "p"))
-        if len(paras) > best_n:
+        targets = _para_targets(sp)
+        if len(targets) > len(best_t):
             cid = sp.find(f".//{_P}cNvPr")
             if cid is not None and cid.get("id"):
-                best, best_n = cid.get("id"), len(paras)
-    return best, best_n
+                best, best_t = cid.get("id"), targets
+    return best, best_t
 
 
 def _effect_par(eid, spid, ap, delay, node_type, grp, effect):
@@ -255,15 +272,14 @@ def apply_entrance(path, effect="bounce", shapes_per_slide=1):
         text = xml.decode("utf-8", "replace")
         if "<p:timing" in text or not _well_formed(xml):
             return xml
-        spid, paras = _body_shape(text)
-        if not spid or paras < 1:
+        spid, targets = _body_shape(text)
+        if not spid or not targets:
             return xml
-        # bullets = paragraphs beyond the (usually empty) first one
-        bullet_count = max(0, paras - 1) if paras > 1 else 1
-        bullet_count = min(bullet_count, max(1, shapes_per_slide * 20))
+        # one effect PER BULLET — every text paragraph is its own entrance,
+        # staggered, so the words animate instead of one invisible gesture.
+        targets = targets[:max(1, shapes_per_slide * 20)]
         effects, eid, grp = [], 20, 0
-        for i in range(bullet_count):
-            ap = i + 1 if paras > 1 else None
+        for i, ap in enumerate(targets):
             node = "clickEffect" if i == 0 else "withEffect"
             delay = i * _STAGGER_MS
             fx = _effect_par(eid, spid, ap, delay, node, grp, effect)
