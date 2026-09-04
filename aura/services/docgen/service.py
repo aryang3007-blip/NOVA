@@ -96,6 +96,16 @@ def generate(kind, spec, folder=None, resolver=None, options=None):
             res["failed_images"] = image_report["failed"]
         return res
 
+    # 4b) honest image report: the BUILDER's embedding count is the truth —
+    #     a generated file that failed to render is reported, never claimed.
+    if image_report.get("count"):
+        built = res.get("embedded_images")
+        if isinstance(built, int) and built != image_report["count"]:
+            image_report["count"] = built
+            for f in (res.get("failed_images") or []):
+                if f not in image_report["failed"]:
+                    image_report["failed"].append(f)
+
     # 5) motion on the finished file — pptx only, never on xlsx/docx.
     motion = None
     if kind == "pptx" and res.get("path"):

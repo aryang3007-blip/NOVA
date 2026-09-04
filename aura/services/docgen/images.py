@@ -2,14 +2,19 @@
 AURA :: AI image generation for PPT slides
 ==========================================
 The same callable is used by the app (via the build service) and the terminal:
-given a prompt + style, pick the provider (manifest imageProviders), call it
-with the owner's vault key, save a PNG under the deck folder and return its
-path. EVERY failure is honest (no key, HTTP error, non-image response) — a
-slide never gets a fake picture.
+given a prompt + style, pick the provider (manifest imageProviders) and the
+provider's model, call it with the owner's vault key, save the image under the
+deck folder and return its path. EVERY failure is honest (no key, HTTP error,
+non-image response) — a slide never gets a fake picture.
 
 Provider payloads (wire-verified in tests with an injected urlopen):
-  gemini (Imagen)  → POST /v1beta/models/<model>:predict
-  openai           → POST /v1/images/generations (b64_json)
+  gemini (Nano Banana) → POST /v1beta/models/<model>:generateContent
+                         with responseModalities [TEXT, IMAGE]; the image
+                         arrives as candidates[].content.parts[].inlineData.
+                         (Imagen 3 was shut down Nov 2025 and Imagen 4 in
+                         Aug 2026 — the live Gemini image models are the
+                         Nano Banana family, e.g. gemini-3.1-flash-image.)
+  openai               → POST /v1/images/generations (b64_json)
 """
 
 import base64
@@ -51,29 +56,53 @@ def availability(key_fn=None):
     return out
 
 
+def models_for(pid):
+    """The provider's selectable models — manifest is the single source."""
+    prov = next((p for p in providers() if p["id"] == pid), None)
+    if not prov:
+        return []
+    return list(prov.get("models") or [{"id": prov.get("model", ""),
+                                        "label": prov.get("model", "")}])
+
+
 def _prompt(style, topic_hint):
     hint = STYLE_HINTS.get(str(style or "").lower().strip())
     base = f"{topic_hint}. {hint}." if hint else str(topic_hint or "").strip()
     return (base + " No text, no watermark, no logos.").strip()
 
 
-def _save_png(data, outdir):
+def _save(data, outdir, mime=""):
+    """Save with the right extension per the payload mime/magic bytes."""
     os.makedirs(outdir, exist_ok=True)
-    path = os.path.join(outdir, f"aura-img-{uuid.uuid4().hex[:12]}.png")
+    ext = ".png"
+    mt = str(mime or "").lower()
+    if "jpeg" in mt or "jpg" in mt or data.startswith(b"\xff\xd8"):
+        ext = ".jpg"
+    elif "webp" in mt or data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        ext = ".webp"
+    path = os.path.join(outdir, f"aura-img-{uuid.uuid4().hex[:12]}{ext}")
     with open(path, "wb") as fh:
         fh.write(data)
     return path
 
 
-def generate(prompt, style="flat illustration", provider="gemini",
-             outdir=None, key_fn=None, urlopen_fn=None, base_override=None):
+def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
+             model=None, key_fn=None, urlopen_fn=None, base_override=None):
     """
-    Generate ONE image.
+    Generate ONE image with the provider's (default or explicitly chosen) model.
     Returns {ok, path?, provider?, model?, message}.
     """
     prov = next((p for p in providers() if p["id"] == provider), None)
     if not prov:
         return {"ok": False, "message": f"unknown image provider '{provider}'"}
+    choices = (prov.get("models") or [])
+    default_model = prov.get("model") or (choices[0]["id"] if choices else "")
+    use_model = str(model or default_model or "").strip()
+    if choices and use_model and use_model not in {c["id"] for c in choices}:
+        return {"ok": False, "message":
+                f"unknown {prov['label']} image model '{use_model}'"}
+    if not use_model:
+        return {"ok": False, "message": f"no image model configured for {provider}"}
     key = (key_fn or _vault_key)(provider)
     if not key:
         return {"ok": False, "message":
@@ -83,10 +112,32 @@ def generate(prompt, style="flat illustration", provider="gemini",
     import urllib.request
 
     full = _prompt(style, prompt)
+    mime = ""
     try:
-        if prov["kind"] == "imagen":
+        if prov["kind"] == "gemini-image":
             url = (base_override or "https://generativelanguage.googleapis.com/v1beta") \
-                + f"/models/{prov['model']}:predict?key={key}"
+                + f"/models/{use_model}:generateContent?key={key}"
+            body = json.dumps({
+                "contents": [{"parts": [{"text": full}]}],
+                "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+            }).encode()
+            req = urllib.request.Request(url, data=body,
+                                         headers={"Content-Type": "application/json"})
+            resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
+            b64 = ""
+            for cand in resp.get("candidates") or []:
+                for part in (cand.get("content") or {}).get("parts") or []:
+                    inline = part.get("inlineData") or part.get("inline_data") or {}
+                    if inline.get("data"):
+                        b64 = inline["data"]
+                        mime = inline.get("mimeType") or inline.get("mime_type") or ""
+                        break
+                if b64:
+                    break
+        elif prov["kind"] == "imagen":  # legacy Imagen :predict — kept for
+            # older manifests; current manifest uses the Nano Banana family.
+            url = (base_override or "https://generativelanguage.googleapis.com/v1beta") \
+                + f"/models/{use_model}:predict?key={key}"
             body = json.dumps({"instances": [{"prompt": full}],
                                "parameters": {"sampleCount": 1}}).encode()
             req = urllib.request.Request(url, data=body,
@@ -95,7 +146,7 @@ def generate(prompt, style="flat illustration", provider="gemini",
             b64 = ((resp.get("predictions") or [{}])[0].get("bytesBase64Encoded") or "")
         elif prov["kind"] == "openai-images":
             url = "https://api.openai.com/v1/images/generations"
-            body = json.dumps({"model": prov["model"], "prompt": full, "n": 1,
+            body = json.dumps({"model": use_model, "prompt": full, "n": 1,
                                "size": "1024x1024", "response_format": "b64_json"}).encode()
             req = urllib.request.Request(url, data=body, headers={
                 "Content-Type": "application/json",
@@ -118,13 +169,9 @@ def generate(prompt, style="flat illustration", provider="gemini",
         return {"ok": False, "message": f"{prov['label']} returned bad base64: {e}"}
     if len(data) > _MAX_IMG:
         return {"ok": False, "message": f"generated image too large ({len(data)} bytes)"}
-    if not data.startswith(b"\x89PNG") and not data.startswith(b"\xff\xd8"):
-        # Imagen may return webp; convert envelope is overkill — keep and let
-        # the renderer try; python-pptx accepts what it can parse.
-        pass
     try:
-        path = _save_png(data, outdir or os.path.expanduser("~/Documents/AURA/images"))
+        path = _save(data, outdir or os.path.expanduser("~/Documents/AURA/images"), mime)
     except Exception as e:
         return {"ok": False, "message": f"could not save image: {e}"}
-    return {"ok": True, "path": path, "provider": provider, "model": prov["model"],
-            "bytes": len(data)}
+    return {"ok": True, "path": path, "provider": provider, "model": use_model,
+            "mime": mime or "image/png", "bytes": len(data)}

@@ -104,17 +104,28 @@ no_key = images.generate("cat", provider="openai", key_fn=lambda p: None)
 ok("no key → honest message, no fake file",
    not no_key["ok"] and "key" in no_key["message"].lower())
 
-def fake_imagen(_req):
+def fake_nano(_req):
     b64 = base64.b64encode(b"\x89PNG\r\n\x1a\nAURA").decode()
     class R:
         def read(self):
-            return b'{"predictions":[{"bytesBase64Encoded":"' + b64.encode() + b'"}]}'
+            return (b'{"candidates":[{"content":{"parts":[{"inlineData":'
+                    b'{"mimeType":"image/png","data":"' + b64.encode() + b'"}}]}}]}')
     return R()
 
 r = images.generate("a rocket", style="flat illustration", provider="gemini",
-                    outdir=OUT, key_fn=lambda p: "test-key", urlopen_fn=fake_imagen)
-ok("gemini imagen flow returns a saved PNG", r["ok"] and os.path.isfile(r.get("path", "")))
-ok("model reported is the manifest model", r.get("model") == "imagen-3.0-generate-002")
+                    outdir=OUT, key_fn=lambda p: "test-key", urlopen_fn=fake_nano)
+ok("gemini Nano Banana flow returns a saved PNG",
+   r["ok"] and os.path.isfile(r.get("path", "")))
+ok("model reported is the LIVE manifest model (Imagen 3/4 are shut down)",
+   r.get("model") == "gemini-3.1-flash-image", str(r.get("model")))
+r2 = images.generate("a rocket", provider="gemini", model="gemini-3-pro-image",
+                     outdir=OUT, key_fn=lambda p: "test-key", urlopen_fn=fake_nano)
+ok("explicit image model override is honoured and reported",
+   r2["ok"] and r2["model"] == "gemini-3-pro-image", str(r2))
+r3 = images.generate("a rocket", provider="gemini", model="imagen-3.0-generate-002",
+                     outdir=OUT, key_fn=lambda p: "test-key", urlopen_fn=fake_nano)
+ok("dead/shoddy model id is rejected honestly before any HTTP call",
+   not r3["ok"] and "unknown" in r3["message"], str(r3))
 
 def fake_error(_req):
     raise urllib.error.HTTPError("https://x", 401, "Unauthorized",
@@ -126,16 +137,18 @@ ok("HTTP 401 → honest provider message",
 
 class BadB64:
     def read(self):
-        return b'{"predictions":[{"bytesBase64Encoded":"@@not-b64@@"}]}'
+        return b'{"candidates":[{"content":{"parts":[{"inlineData":{"data":"@@not-b64@@"}}]}}]}'
 r = images.generate("x", provider="gemini", outdir=OUT,
                     key_fn=lambda p: "k", urlopen_fn=lambda _req: BadB64())
 ok("bad base64 → honest message", not r["ok"] and "bad base64" in r["message"])
 
 # expand_image_markers with a stubbed generator (no network in tests)
 _orig = images.generate
-def _stub(prompt, style, provider, outdir):
+_seen_models = []
+def _stub(prompt, style, provider, outdir, model=None):
+    _seen_models.append(model)
     return {"ok": True, "path": os.path.join(outdir, "stub.png"),
-            "provider": provider, "model": "stub", "bytes": 4}
+            "provider": provider, "model": model or "stub", "bytes": 4}
 images.generate = _stub
 try:
     spec = {"title": "T", "slides": [
@@ -144,10 +157,13 @@ try:
     ]}
     spec2, embedded, failed = outline.expand_image_markers(
         spec, {"enabled": True, "count": 2, "style": "flat illustration",
-               "provider": "gemini"}, "Mars", OUT)
+               "provider": "gemini", "model": "gemini-3-pro-image"}, "Mars", OUT)
     ok("markers become real image paths", spec2["slides"][0]["image"].endswith("stub.png"))
     ok("auto-visual fills an empty image slide", spec2["slides"][1]["image"].endswith("stub.png"))
     ok("embedded report lists the slides", len(embedded) == 2 and not failed)
+    ok("chosen image model reaches the generator (markers + auto)",
+       len(_seen_models) == 2 and all(m == "gemini-3-pro-image" for m in _seen_models),
+       str(_seen_models))
     spec3, e3, f3 = outline.expand_image_markers(spec, {"enabled": False}, "Mars", OUT)
     ok("images disabled → spec untouched", e3 == [] and spec3["slides"][0]["image"] == "@gen:3d render")
 finally:
@@ -160,13 +176,24 @@ def resolver(path, must_exist=False, **kw):  # noqa: unused kwargs on purpose
 
 import zipfile  # noqa: E402
 
-_SLIDE1 = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-           '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
-           'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
-           '<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/></p:nvGrpSpPr>'
-           '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title 1"/></p:nvSpPr></p:sp>'
-           '</p:spTree></p:cSld></p:sld>')
-_SLIDE2 = _SLIDE1.replace('Title 1', 'Title 2')
+def _slide(title, tid):
+    """Realistic minimal slide: a title (1 paragraph) + a body shape with 3
+    bullet paragraphs — what the per-bullet engine actually targets."""
+    return (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            f'<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+            f'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            f'<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/></p:nvGrpSpPr>'
+            f'<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title {tid}"/></p:nvSpPr>'
+            f'<p:txBody><a:bodyPr/><a:p><a:r><a:t>{title}</a:t></a:r></a:p>'
+            f'</p:txBody></p:sp>'
+            f'<p:sp><p:nvSpPr><p:cNvPr id="3" name="Content Placeholder {tid}"/></p:nvSpPr>'
+            f'<p:txBody><a:bodyPr/>'
+            f'<a:p><a:r><a:t>{title} one</a:t></a:r></a:p>'
+            f'<a:p><a:r><a:t>{title} two</a:t></a:r></a:p>'
+            f'<a:p><a:r><a:t>{title} three</a:t></a:r></a:p>'
+            f'</p:txBody></p:sp></p:spTree></p:cSld></p:sld>')
+_SLIDE1 = _slide("Title One", 1)
+_SLIDE2 = _slide("Title Two", 2)
 
 
 def _fixture_pptx(path):
@@ -194,10 +221,20 @@ ok("transition applied to content slides only (title skipped)",
 an = animations.apply_entrance(path, "bounce")
 ok("entrance animation applied", an["ok"] and an["applied"] == 2, str(an))
 ok("motioned file is still a valid zip (OOXML)", zipfile.is_zipfile(path))
-slide2 = zipfile.ZipFile(path).read("ppt/slides/slide2.xml").decode()
-slide1 = zipfile.ZipFile(path).read("ppt/slides/slide1.xml").decode()
+with zipfile.ZipFile(path) as zf:
+    slide2 = zf.read("ppt/slides/slide2.xml").decode()
+    slide1 = zf.read("ppt/slides/slide1.xml").decode()
+    import xml.etree.ElementTree as _ET
+    for _n in sorted(n for n in zf.namelist() if n.startswith("ppt/slides/slide")):
+        _ET.fromstring(zf.read(_n))  # real parse — raises if corrupt
+ok("EVERY slide part re-parses after motion (corruption guard)", True)
 ok("slide XML contains the <p:transition node", "<p:transition" in slide2)
 ok("slide XML contains <p:animEffect", "animEffect" in slide2)
+ok("animations target BULLET paragraphs (<p:ap> per bullet)",
+   '<p:ap p="1"' in slide2 and '<p:ap p="2"' in slide2, "ap targets missing")
+ok("one effect per bullet (2 bullets → 2 entrance effects)",
+   slide2.count("presetClass=\"entr\"") == 2,
+   str(slide2.count("presetClass=\"entr\"")))
 ok("title slide is untouched (skip_first)", "<p:transition" not in slide1)
 ok("_insert_ordered puts transition before timing",
    slide2.index("<p:transition") < slide2.index("</p:sld>"))
@@ -226,6 +263,30 @@ if doc_builder.capabilities()["pptx"]:
     from pptx import Presentation
     Presentation(r["path"])
     ok("motioned real deck still opens in python-pptx", True)
+
+    # ── honest embedding: "resolved" ≠ "in the deck" ──
+    _PNG_1PX = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+                "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+    tiny = os.path.join(OUT, "tiny.png")
+    with open(tiny, "wb") as fh:
+        fh.write(base64.b64decode(_PNG_1PX))
+    ri = doc_builder.build("pptx", {
+        "title": "Pics", "subtitle": "t",
+        "slides": [{"kind": "image", "title": "Shot", "image": tiny,
+                    "purpose": "caption for the shot"}],
+    }, folder=OUT, resolver=resolver)
+    ok("image slide with a real PNG embeds it (count = 1)",
+       ri["ok"] and ri.get("embedded_images") == 1, str(ri.get("message", ""))[:80])
+    media = [n for n in zipfile.ZipFile(ri["path"]).namelist()
+             if n.startswith("ppt/media/")]
+    ok("the picture really landed in ppt/media/", len(media) >= 1, str(media))
+    rmiss = doc_builder.build("pptx", {
+        "title": "Miss", "subtitle": "t",
+        "slides": [{"kind": "image", "title": "Shot", "image": "/no/such/file.png"}],
+    }, folder=OUT, resolver=resolver)
+    ok("missing image is reported FAILED, never 'embedded'",
+       rmiss["ok"] and rmiss.get("embedded_images") == 0
+       and bool(rmiss.get("failed_images")), str(rmiss.get("failed_images")))
 else:
     ok("real-deck branch skipped (no python-pptx in this env) — honest", True)
 
@@ -287,6 +348,15 @@ ok("wizard answers win over flag defaults",
    merged["theme"] == "professional-dark" and merged["transition"] == "wheel"
    and merged["animation"] == "bounce"
    and merged["images"]["enabled"] is True, str(merged))
+
+# provider with >1 model asks the exact image model (popup parity)
+# design[1] slides[12] images yes[2? no: 1] count[2] style[3] provider[1=gemini]
+# model[2=gemini-3.1-flash-lite-image] transition[11=wheel] speed[3=slow] anim[2=bounce]
+answers2 = iter(["1", "12", "1", "2", "3", "1", "2", "11", "3", "2"])
+wiz2 = serve._cli_doc_wizard("pptx", input_fn=lambda p: next(answers2))
+ok("image-model question answers the exact model (1-based, like the popup)",
+   wiz2 is not None and wiz2[0]["images"].get("model") == "gemini-3.1-flash-lite-image",
+   str(wiz2[0]["images"]) if wiz2 else "cancelled")
 
 # pure pickers: Enter = default, 1-based pick, bad input honest
 def feed(*seq):

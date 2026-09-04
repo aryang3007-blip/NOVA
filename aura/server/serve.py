@@ -1692,8 +1692,26 @@ def _cli_doc_wizard(kind, slides=0, input_fn=None):
         prov_i = _cli_ask_choice("Image provider?", provs, default_idx=0, input_fn=inp)
         if prov_i is None:
             return None
-        opts["images"] = {"enabled": True, "count": cnt, "style": styles[style_i],
-                          "provider": provs[prov_i]}
+        provider_id = provs[prov_i]
+        img_opts = {"enabled": True, "count": cnt, "style": styles[style_i],
+                    "provider": provider_id}
+        # Same choice as the popup: when the provider ships >1 model, ask
+        # which one — so the exact model that will run is never a surprise.
+        prov_meta = {}
+        try:
+            if _reg:
+                prov_meta = next((p for p in _reg.image_providers()
+                                  if p["id"] == provider_id), {})
+        except Exception:
+            prov_meta = {}
+        model_opts = prov_meta.get("models") or []
+        if len(model_opts) > 1:
+            m_i = _cli_ask_choice("Image model?", [m["id"] for m in model_opts],
+                                  default_idx=0, input_fn=inp)
+            if m_i is None:
+                return None
+            img_opts["model"] = model_opts[m_i]["id"]
+        opts["images"] = img_opts
 
     # ── motion (like PowerPoint's ease: transition + entrance) ──
     trans = list(_reg.transitions()) if _reg else ["fade"]
@@ -1747,7 +1765,10 @@ def _cli_describe_options(opts, kind, slides=0):
     parts.append(f"transition: {opts.get('transition', 'fade')} ({opts.get('speed', 'med')})")
     parts.append(f"animation: {opts.get('animation', 'none')}")
     if img.get("enabled"):
-        parts.append(f"images: {img.get('count')} ({img.get('style')}, {img.get('provider')})")
+        parts.append(f"images: {img.get('count')} ({img.get('style')}, "
+                     f"{img.get('provider')}"
+                     + (f" → {img.get('model')}" if img.get("model") else "")
+                     + ")")
     say(f"  {c(37, 'You chose:')} " + " · ".join(parts))
 
 

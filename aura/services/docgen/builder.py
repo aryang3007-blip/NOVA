@@ -451,7 +451,9 @@ def _image_px(path):
 
 def _render_image(prs, raw, idx, total, deck, t):
     """'image' slides: full-bleed-ish picture + caption. No image → honest
-    placeholder text instead of silently dropping the slide."""
+    placeholder text instead of silently dropping the slide. Returns True
+    ONLY when the picture really landed in the deck — the caller counts
+    embeddings from this, never from "the file resolved"."""
     from pptx.util import Inches
     sl = prs.slides.add_slide(prs.slide_layouts[6])
     _slide_bg(sl, t["bg"])
@@ -464,40 +466,37 @@ def _render_image(prs, raw, idx, total, deck, t):
                       "Add an image (path or https URL) to this slide in the outline to embed it."],
                      18, t["ink"], t["accent"])
         _notes(sl, raw)
-        return
+        return False
     # Fit inside the content box, preserving aspect ratio. Dimensions come
     # from our own header parser (no pptx.image module exists in python-pptx
     # 0.6.x — importing it was the crash that made the whole deck unsavable).
     pw, ph = _image_px(path)
     box_w, box_h = _SLIDE_W - 1.8, 4.4
-    if pw and ph:
-        ar = pw / ph
-        if ar >= box_w / box_h:
-            w_i, h_i = box_w, box_w / ar
-        else:
-            h_i, w_i = box_h, box_h * ar
-        left = (_SLIDE_W - w_i) / 2
-        try:
+    try:
+        if pw and ph:
+            ar = pw / ph
+            if ar >= box_w / box_h:
+                w_i, h_i = box_w, box_w / ar
+            else:
+                h_i, w_i = box_h, box_h * ar
+            left = (_SLIDE_W - w_i) / 2
             sl.shapes.add_picture(path, Inches(left), Inches(1.62),
                                   width=Inches(w_i), height=Inches(h_i))
-        except Exception as e:
-            _add_bullets(sl, 0.9, 1.9, 11.4, 4.4,
-                         [f"Image could not be rendered — {e}."], 18, t["ink"], t["accent"])
-            _notes(sl, raw)
-            return
-    else:
-        # Unknown format: height-only keeps the aspect ratio (no distortion).
-        sl.shapes.add_picture(path, Inches(0.9), Inches(1.62),
-                              height=Inches(box_h))
+        else:
+            # Unknown format: height-only keeps the aspect ratio (no distortion).
+            sl.shapes.add_picture(path, Inches(0.9), Inches(1.62),
+                                  height=Inches(box_h))
+    except Exception as e:
         _add_bullets(sl, 0.9, 1.9, 11.4, 4.4,
                      [f"Image could not be rendered — {e}."], 18, t["ink"], t["accent"])
         _notes(sl, raw)
-        return
+        return False
     cap = raw.get("imageCaption") or raw.get("purpose") or ""
     if cap:
         _add_text(sl, 0.9, 6.3, _SLIDE_W - 1.8, 0.7, str(cap), size=13,
                   color=t["dim"], align=None)
     _notes(sl, raw)
+    return True
     return sl
 
 
@@ -797,18 +796,16 @@ def build_pptx(spec, folder=None, resolver=None):
         kind = str(raw.get("kind") or "").lower().strip()
         renderer = _KIND_RENDERERS.get(kind, _render_bullets)
         render_raw = raw
+        img_ok = False
         if raw.get("image"):
             # NOTE: img_* names — `path` is the OUTPUT deck path, shadowing it
             # here made prs.save() write the deck over the image file.
             img_path, img_ok, img_note = _load_image(raw["image"], resolver)
             render_raw = {**raw, "_imagePath": img_path if img_ok else None,
                           "_imageNote": img_note}
-            if img_ok:
-                embedded.append(f"slide {idx}")
-            else:
-                failed.append(f"slide {idx}: {img_note}")
+        added = False
         try:
-            renderer(prs, render_raw, idx, total, deck_title, t)
+            added = renderer(prs, render_raw, idx, total, deck_title, t) is True
         except Exception:
             # A fancy layout failing must never kill the deck: render plain.
             fb = prs.slides.add_slide(prs.slide_layouts[6])
@@ -817,6 +814,12 @@ def build_pptx(spec, folder=None, resolver=None):
             _add_bullets(fb, 0.75, 1.55, 11.9, 5.2, _content_fallback_bullets(raw),
                          18, t["ink"], t["accent"])
             _notes(fb, raw)
+        # Honest embedding count: the PICTURE is in the deck only when the
+        # renderer says so — resolution success is not an embed.
+        if img_ok and added:
+            embedded.append(f"slide {idx}")
+        elif raw.get("image") and not (img_ok and added):
+            failed.append(f"slide {idx}: {img_note if not img_ok else 'image could not be rendered'}")
         rendered += 1
 
     try:

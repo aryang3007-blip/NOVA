@@ -27,12 +27,54 @@ const MODAL_CSS = `
   border-radius: 8px; padding: .5rem .6rem; font-family: var(--font, inherit); font-size: .85rem; }
 .fk-hint { font-size: .66rem; color: var(--dim, #7d8da3); margin-top: .2rem; }
 .fk-check { display: flex; align-items: center; gap: .5rem; font-size: .8rem; margin: .5rem 0; }
-.fk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .5rem; }
+.fk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem; }
 .fk-theme { border: 1px solid var(--panel-brd, rgba(148,175,205,.16)); border-radius: 10px;
   padding: .5rem; cursor: pointer; background: var(--bg-3, #0a0e16); text-align: center; }
 .fk-theme.sel { outline: 2px solid var(--accent, #38bdf8); }
-.fk-theme .sw { display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin-bottom: .3rem; }
-.fk-theme .nm { font-size: .62rem; color: var(--dim, #7d8da3); }
+.fk-theme .nm { font-size: .62rem; color: var(--dim, #7d8da3); margin-top: .35rem; }
+/* mini card = the ACTUAL slide the builder paints with that theme's palette */
+.fk-mini { aspect-ratio: 16 / 9.5; border-radius: 6px; padding: 7px 8px; text-align: left;
+  overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); }
+.fk-mini-accent { height: 4px; width: 28px; border-radius: 2px; margin-bottom: 6px; }
+.fk-mini-title { font-size: .6rem; font-weight: 700; letter-spacing: .01em; line-height: 1.2;
+  margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fk-mini-chip { font-size: .5rem; line-height: 1.3; padding: 2.5px 6px; border-radius: 4px;
+  margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* outline model — the real model, explicitly, never a vague dropdown */
+.fk-model { margin: .35rem 0; border: 1px solid var(--panel-brd, rgba(148,175,205,.16));
+  border-radius: 10px; background: var(--bg-3, #0a0e16); padding: .55rem .65rem; }
+.fk-model-head { display: flex; align-items: center; gap: .45rem; font-size: .62rem;
+  letter-spacing: .12em; color: var(--dim, #7d8da3); margin-bottom: .4rem; }
+.fk-model-head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok, #34d399);
+  box-shadow: 0 0 8px rgba(52,211,153,.7); flex: none; }
+.fk-model-body { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.fk-model-body b { color: var(--text, #e8eef5); font-weight: 700; font-size: .9rem; }
+.fk-desc { font-size: .66rem; color: var(--dim, #7d8da3); margin-top: .4rem; line-height: 1.55; }
+.fk-desc b { color: var(--text, #e8eef5); }
+.fk-prov-chip { font-size: .66rem; padding: .15rem .5rem; border-radius: 20px;
+  background: rgba(var(--accent-rgb), .12); border: 1px solid rgba(var(--accent-rgb), .35);
+  color: var(--accent, #38bdf8); }
+.fk-tag { font-size: .56rem; letter-spacing: .06em; padding: .14rem .45rem; border-radius: 20px;
+  font-weight: 700; }
+.fk-tag.ok { background: rgba(52,211,153,.12); color: var(--ok, #34d399);
+  border: 1px solid rgba(52,211,153,.4); }
+.fk-tag.warn { background: rgba(255,196,60,.1); color: #ffc43c;
+  border: 1px solid rgba(255,196,60,.4); }
+/* image provider + model picker */
+.fk-img-row { display: flex; gap: .6rem; flex-wrap: wrap; }
+.fk-img-row > * { flex: 1; min-width: 120px; }
+.fk-provs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: .5rem; margin: .2rem 0 .55rem; }
+.fk-prov { border: 1px solid var(--panel-brd, rgba(148,175,205,.16)); border-radius: 10px;
+  background: var(--bg-3, #0a0e16); padding: .55rem .6rem; cursor: pointer; }
+.fk-prov.sel { outline: 2px solid var(--accent, #38bdf8); }
+.fk-prov.nokey { opacity: .78; }
+.fk-prov-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.fk-prov-head b { font-size: .72rem; color: var(--text, #e8eef5); }
+.fk-prov-sub { font-size: .62rem; color: var(--dim, #7d8da3); margin-top: .3rem; line-height: 1.5; }
+.fk-prov-models { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .4rem; }
+.fk-prov-model { font-size: .56rem; padding: .12rem .4rem; border-radius: 5px;
+  background: rgba(148,175,205,.1); color: var(--dim, #7d8da3); }
 .fk-status { margin-top: .8rem; max-height: 150px; overflow-y: auto;
   font-family: var(--mono, monospace); font-size: .68rem; line-height: 1.7;
   background: rgba(0,0,0,.25); border-radius: 8px; padding: .5rem .6rem; }

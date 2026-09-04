@@ -37,11 +37,19 @@ ok('exactly the four features', pyFeats.size === 4, String(pyFeats.size));
 const eqList = (name, a, b) => ok(name, JSON.stringify(a) === JSON.stringify(b),
                                   `py=${JSON.stringify(a)} js=${JSON.stringify(b)}`);
 eqList('themes identical', py.themes, FEATURE_MANIFEST.themes);
+eqList('theme previews identical (real builder palettes)',
+       py.themePreviews, FEATURE_MANIFEST.themePreviews);
 eqList('transitions identical', py.transitions, FEATURE_MANIFEST.transitions);
 eqList('entrance animations identical', py.animations, FEATURE_MANIFEST.animations);
-eqList('image providers identical (id/kind/model)',
-       py.imageProviders.map(p => [p.id, p.kind, p.model]),
-       FEATURE_MANIFEST.imageProviders.map(p => [p.id, p.kind, p.model]));
+eqList('image providers identical (incl. model lists)',
+       py.imageProviders, FEATURE_MANIFEST.imageProviders);
+ok('gemini image provider ships the live Nano Banana model list',
+   py.imageProviders?.[0]?.kind === 'gemini-image' &&
+   py.imageProviders?.[0]?.model === 'gemini-3.1-flash-image' &&
+   JSON.stringify(py.imageProviders?.[0]?.models?.map(m => m.id)) ===
+     JSON.stringify(['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image',
+                     'gemini-3-pro-image']),
+   JSON.stringify(py.imageProviders?.[0]?.models));
 ok('every default set identical (incl. preconfigured model)',
    Object.keys(FEATURE_MANIFEST.features).every(id =>
      JSON.stringify(py.defaults[id]) === JSON.stringify(defaultsFor(id))),

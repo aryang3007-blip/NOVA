@@ -76,6 +76,7 @@ def expand_image_markers(spec: Dict[str, Any], images_opts: Optional[Dict[str, A
         return spec, [], []
     from . import images as images_mod
     provider = opts.get("provider") or "gemini"
+    model = str(opts.get("model") or "").strip() or None
     style = opts.get("style") or "flat illustration"
     count = max(1, min(3, int(opts.get("count") or 1)))
     embedded, failed, map_ = [], [], {}
@@ -87,7 +88,8 @@ def expand_image_markers(spec: Dict[str, Any], images_opts: Optional[Dict[str, A
         if img.lower().startswith("@gen:"):
             style_hint = img.split(":", 1)[1].strip() or style
             prompt = f"{s.get('title') or 'Visual'} for a deck about {topic}"
-            r = images_mod.generate(prompt, style_hint, provider, outdir)
+            r = images_mod.generate(prompt, style_hint, provider, outdir,
+                                    model=model)
             if r.get("ok"):
                 slides[i] = {**s, "image": r["path"]}
                 embedded.append(f"slide {i + 1}")
@@ -102,7 +104,7 @@ def expand_image_markers(spec: Dict[str, Any], images_opts: Optional[Dict[str, A
             break
         if str(s.get("kind") or "").lower() in ("image", "media") and not s.get("image"):
             prompt = f"{s.get('title') or 'Visual'} for a deck about {topic}"
-            r = images_mod.generate(prompt, style, provider, outdir)
+            r = images_mod.generate(prompt, style, provider, outdir, model=model)
             if r.get("ok"):
                 slides[i] = {**s, "image": r["path"]}
                 embedded.append(f"slide {i + 1}")

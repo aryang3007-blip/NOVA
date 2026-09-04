@@ -2,9 +2,11 @@
  * AURA :: PPT Builder — the whole deck in a popup
  * ================================================
  * "Hey AURA, create a PPT on Mars for my holiday homework" → this card opens
- * with topic + audience prefilled. You pick: design (6 themes), length
- * (slider or exact number), outline model (any configured API key), AI
- * images (count/style/provider), slide transition + entrance animation.
+ * with topic + audience prefilled. You pick: design (6 themes, each tile is a
+ * REAL miniature of the card built from the actual palette the builder uses),
+ * length (slider or exact number), outline model (preconfigured — shown
+ * explicitly, never a vague dropdown), AI images (count/style/provider AND
+ * the exact image model), slide transition + entrance animation.
  * AURA's subsystem builds it through the CANONICAL services.docgen.service —
  * the same code the terminal and tests call.
  *
@@ -14,21 +16,43 @@ import { field, textInput, select, checkbox, slider, btn, statusBox, statusLine 
   from '../../js/features/kit.js';
 import { FEATURE_MANIFEST } from '../../js/features/registry.js';
 
-const THEME_SWATCHES = {
-  'professional-dark': ['#0B101A', '#F2F5F9', '#E8B74A'],
-  'professional-light': ['#FFFFFF', '#101824', '#B8861F'],
-  academic: ['#FAF9F6', '#1B2A4A', '#1F4E9C'],
-  minimal: ['#FFFFFF', '#161616', '#444444'],
-  holiday: ['#102B1C', '#FFF7E6', '#F2B13D'],
-  neon: ['#070A12', '#EDF3FF', '#38BDF8'],
-};
 const IMAGE_STYLES = ['flat illustration', 'photorealistic', '3d render',
                       'watercolor', 'line art', 'holiday'];
+
+/** Real theme name → the popup heading, e.g. 'professional-dark'. */
+function heading(t) {
+  return t.replace(/-/g, ' ');
+}
+
+/** A miniature of the actual slide the builder paints for this theme. */
+function miniCard(pal) {
+  const c = document.createElement('div');
+  c.className = 'fk-mini';
+  c.style.background = pal.bg;
+  c.style.color = pal.ink;
+  const accent = document.createElement('div');
+  accent.className = 'fk-mini-accent';
+  accent.style.background = pal.accent;
+  const title = document.createElement('div');
+  title.className = 'fk-mini-title';
+  title.textContent = 'Your Topic';
+  c.append(accent, title);
+  for (const line of ['Bullet one', 'Bullet two']) {
+    const chip = document.createElement('div');
+    chip.className = 'fk-mini-chip';
+    chip.style.background = pal.panel;
+    chip.style.color = pal.ink;
+    chip.textContent = `• ${line}`;
+    c.append(chip);
+  }
+  return c;
+}
 
 export async function mount({ root, meta, prefill, ctx, close }) {
   const engine = ctx.engine, actions = ctx.actions, config = ctx.config;
   const d = meta.defaults || {};
   const p = prefill || {};
+  const previews = FEATURE_MANIFEST.themePreviews || {};
 
   const card = document.createElement('div');
   card.className = 'feature-card';
@@ -51,21 +75,21 @@ export async function mount({ root, meta, prefill, ctx, close }) {
   const details = textInput(p.details || '', 'extra points to include — leave blank for auto');
   card.append(field({ label: 'Extra instructions', input: details }));
 
-  // ── design ──
+  // ── design: real mini-card previews in the ACTUAL theme palettes ──
   const themes = FEATURE_MANIFEST.themes;
   const themeGrid = document.createElement('div');
   themeGrid.className = 'fk-grid';
   let chosenTheme = d.theme || 'professional-dark';
   for (const t of themes) {
+    const pal = previews[t] || { bg: '#101418', ink: '#e8eef5',
+                                 accent: '#38bdf8', panel: '#1a2230' };
     const c = document.createElement('div');
     c.className = `fk-theme${t === chosenTheme ? ' sel' : ''}`;
-    const sw = document.createElement('div');
-    sw.className = 'sw';
-    sw.style.background = `linear-gradient(90deg, ${(THEME_SWATCHES[t] || ['#333', '#eee', '#38bdf8']).join(',')})`;
+    c.append(miniCard(pal));
     const nm = document.createElement('div');
     nm.className = 'nm';
-    nm.textContent = t.replace(/-/g, ' ');
-    c.append(sw, nm);
+    nm.textContent = heading(t);
+    c.append(nm);
     c.addEventListener('click', () => {
       chosenTheme = t;
       themeGrid.querySelectorAll('.fk-theme').forEach(x => x.classList.remove('sel'));
@@ -73,7 +97,7 @@ export async function mount({ root, meta, prefill, ctx, close }) {
     });
     themeGrid.append(c);
   }
-  card.append(field({ label: 'Design', input: themeGrid }));
+  card.append(field({ label: 'Design — how your cards will look', input: themeGrid }));
 
   // ── length ──
   const countWrap = document.createElement('div');
@@ -92,37 +116,116 @@ export async function mount({ root, meta, prefill, ctx, close }) {
   countWrap.append(range, countNum);
   card.append(field({ label: 'Length (slides)', input: countWrap }));
 
-  // ── outline model: ONE preconfigured model (manifest defaults.model) ──
+  // ── outline model: the ONE preconfigured model, shown explicitly ──
   const pinModel = d.model || 'gemini-3.8-flash';
-  const pinLine = document.createElement('div');
-  pinLine.className = 'fk-pin';
-  pinLine.innerHTML = `<span class="dot"></span> Outline model: <b>Google Gemini — ${pinModel}</b>
-    <span class="fk-note">(preconfigured for documents · add the Gemini key in Settings → API Keys)</span>`;
-  card.append(pinLine);
+  const hasPinKey = !!(config?.getKey?.('gemini') || config?.data?.apiKeys?.gemini);
+  const modelBox = document.createElement('div');
+  modelBox.className = 'fk-model';
+  modelBox.innerHTML = `
+    <div class="fk-model-head"><span class="dot"></span> OUTLINE MODEL — PRE-CONFIGURED</div>
+    <div class="fk-model-body">
+      <span class="fk-prov-chip">Google Gemini</span>
+      <b>${pinModel}</b>
+      <span class="fk-tag ok">FIXED FOR DECKS</span>
+    </div>
+    <div class="fk-desc">Every deck outline is generated by this model — writing, slide
+      structure and image prompts, in one pass.${hasPinKey
+        ? ' <b>Your Gemini key is set</b> — outlines will use it.'
+        : ' Add the <b>Gemini API key</b> in Settings → API Keys to enable outlines.'}</div>`;
+  card.append(field({ label: 'Outline model (no guessing)', input: modelBox }));
 
-  // ── AI images ──
+  // ── AI images: pick provider AND the exact image model ──
   const imgBox = checkbox('Generate AI images and embed them on visual slides',
                           d.images?.enabled !== false);
   const imgCount = select([1, 2, 3].map(n => ({ value: n, label: `${n} image${n > 1 ? 's' : ''}` })),
                           d.images?.count || 1);
   const imgStyle = select(IMAGE_STYLES.map(s => ({ value: s, label: s })),
                           d.images?.style || 'flat illustration');
-  const imgProvOpts = FEATURE_MANIFEST.imageProviders.map(ip => {
-    const has = !!config?.getKey?.(ip.id);
-    return { value: ip.id, label: has ? ip.label : `${ip.label} (no key — add in Settings)` };
+  const providers = FEATURE_MANIFEST.imageProviders || [];
+  let chosenProv = d.images?.provider || providers[0]?.id || 'gemini';
+  if (!providers.some(pr => pr.id === chosenProv)) chosenProv = providers[0]?.id || 'gemini';
+  const provWrap = document.createElement('div');
+  provWrap.className = 'fk-provs';
+  const provCards = new Map();
+  for (const ip of providers) {
+    const has = !!(config?.getKey?.(ip.id) || config?.data?.apiKeys?.[ip.id]);
+    const pc = document.createElement('div');
+    pc.className = `fk-prov${ip.id === chosenProv ? ' sel' : ''}${has ? '' : ' nokey'}`;
+    const h = document.createElement('div');
+    h.className = 'fk-prov-head';
+    const b = document.createElement('b');
+    b.textContent = ip.label;
+    const tag = document.createElement('span');
+    tag.className = `fk-tag ${has ? 'ok' : 'warn'}`;
+    tag.textContent = has ? '✓ KEY FOUND' : '⚠ NO KEY — ADD IN SETTINGS';
+    h.append(b, tag);
+    const sub = document.createElement('div');
+    sub.className = 'fk-prov-sub';
+    sub.textContent = ip.note || '';
+    const models = document.createElement('div');
+    models.className = 'fk-prov-models';
+    for (const m of (ip.models || [])) {
+      const ms = document.createElement('span');
+      ms.className = 'fk-prov-model';
+      ms.textContent = m.label;
+      models.append(ms);
+    }
+    pc.append(h, sub, models);
+    pc.addEventListener('click', () => {
+      chosenProv = ip.id;
+      provWrap.querySelectorAll('.fk-prov').forEach(x => x.classList.remove('sel'));
+      pc.classList.add('sel');
+      renderImageModels();
+    });
+    provCards.set(ip.id, pc);
+    provWrap.append(pc);
+  }
+
+  const imgModel = select([], '');
+  const imgModelNote = document.createElement('div');
+  imgModelNote.className = 'fk-hint';
+  function currentProvider() {
+    return providers.find(pr => pr.id === chosenProv) || { models: [], model: '' };
+  }
+  function renderImageModels() {
+    const ip = currentProvider();
+    const opts = ip.models || [];
+    imgModel.textContent = '';          // clear previous options (works everywhere)
+    const want = (d.images?.provider === ip.id ? d.images?.model : '') ||
+                 ip.model || opts[0]?.id || '';
+    for (const m of opts) {
+      const o = document.createElement('option');
+      o.value = m.id;
+      o.textContent = m.label;
+      if (m.id === want) o.selected = true;
+      imgModel.append(o);
+    }
+    imgModel.style.display = opts.length > 1 ? '' : 'none';
+    imgModelNote.textContent = ip.models?.find(m => m.id === imgModel.value)?.note || '';
+  }
+  imgModel.addEventListener('change', () => {
+    imgModelNote.textContent = currentProvider().models
+      ?.find(m => m.id === imgModel.value)?.note || '';
   });
-  const imgProv = select(imgProvOpts, d.images?.provider || 'gemini');
   card.append(field({ label: 'Images', input: imgBox.wrap }));
   const imgRow = document.createElement('div');
-  imgRow.style.display = 'flex';
-  imgRow.style.gap = '.6rem';
-  imgRow.style.flexWrap = 'wrap';
+  imgRow.className = 'fk-img-row';
   imgRow.append(field({ label: 'Count', input: imgCount }),
-                field({ label: 'Style', input: imgStyle }),
-                field({ label: 'Provider', input: imgProv }));
-  if (!imgBox.cb.checked) imgRow.style.display = 'none';
-  imgBox.cb.addEventListener('change', () => { imgRow.style.display = imgBox.cb.checked ? '' : 'none'; });
+                field({ label: 'Style', input: imgStyle }));
   card.append(imgRow);
+  const imgModelField = field({ label: 'Image model', input: imgModel });
+  imgModelField.append(imgModelNote);
+  card.append(imgModelField);
+  renderImageModels();
+  if (!imgBox.cb.checked) selfHide();
+  imgBox.cb.addEventListener('change', () => selfHide());
+  function selfHide() {
+    const on = imgBox.cb.checked;
+    imgRow.style.display = on ? '' : 'none';
+    imgModelField.style.display = on ? '' : 'none';
+    provWrap.style.display = on ? '' : 'none';
+  }
+  card.append(provWrap);
 
   // ── motion ──
   const transition = select(FEATURE_MANIFEST.transitions.map(t => ({ value: t, label: t })),
@@ -138,7 +241,7 @@ export async function mount({ root, meta, prefill, ctx, close }) {
   motionRow.append(field({ label: 'Slide transition', input: transition }),
                    field({ label: 'Speed', input: speed }),
                    field({ label: 'Entrance animation', input: animation }));
-  card.append(field({ label: 'Motion', input: motionRow }));
+  card.append(field({ label: 'Motion — applied to every bullet', input: motionRow }));
 
   // ── LIVE PROMPT PREVIEW: exactly what outline() sends (one builder) ──
   const promptBox = document.createElement('details');
@@ -157,7 +260,7 @@ export async function mount({ root, meta, prefill, ctx, close }) {
       details: details.value.trim(),
     });
     pPre.textContent =
-      `MODEL: gemini — ${pinModel} (preconfigured · thinking disabled · budget escalates on truncation)\n\n`
+      `MODEL: Google Gemini — ${pinModel} (preconfigured · thinking disabled · budget escalates on truncation)\n\n`
       + `──── SYSTEM ────\n${p.system}\n\n──── USER ────\n${p.user}`;
   };
   const refreshPrompt = () => { if (promptBox.open) renderPrompt(); };
@@ -198,8 +301,10 @@ export async function mount({ root, meta, prefill, ctx, close }) {
       const spec = o.spec;
       const imgOn = imgBox.cb.checked;
       const imgCountN = Number(imgCount.value) || 1;
+      const imgModelId = imgModel.value || currentProvider().model;
+      const provLabel = currentProvider().label || chosenProv;
       if (imgOn) {
-        statusLine(box, `▸ Preparing ${imgCountN} AI image slide(s) (${imgStyle.value}, ${imgProv.value})…`);
+        statusLine(box, `▸ Preparing ${imgCountN} AI image slide(s) (${imgStyle.value}, ${provLabel} → ${imgModelId})…`);
         const marker = `@gen:${imgStyle.value}`;
         const fillable = spec.slides.filter(s =>
           String(s.kind || '').toLowerCase() === 'image' && !s.image);
@@ -223,7 +328,8 @@ export async function mount({ root, meta, prefill, ctx, close }) {
         speed: speed.value,
         animation: animation.value,
         images: imgOn
-          ? { enabled: true, count: imgCountN, style: imgStyle.value, provider: imgProv.value }
+          ? { enabled: true, count: imgCountN, style: imgStyle.value,
+              provider: chosenProv, model: imgModelId }
           : { enabled: false },
       };
       statusLine(box, `▸ Rendering ${spec.slides.length} slides (design: ${chosenTheme})…`);
@@ -232,7 +338,7 @@ export async function mount({ root, meta, prefill, ctx, close }) {
       statusLine(box, `✓ ${r.message}`, 'ok');
       statusLine(box, `  ${r.path}  ·  ${(r.bytes / 1024).toFixed(1)} KB`, 'ok');
       const im = r.images || {};
-      if (im.count) statusLine(box, `  • ${im.count} AI image(s) embedded`, 'ok');
+      if (im.count) statusLine(box, `  • ${im.count} AI image(s) embedded (${imgModelId})`, 'ok');
       if (im.failed?.length) statusLine(box, `  • image skip: ${im.failed[0]}`, 'err');
       const mo = r.motion || {};
       if (mo.transitions?.applied) statusLine(box, `  • ${mo.transitions.applied} slide transitions (${mo.transitions.style})`, 'ok');

@@ -42,6 +42,10 @@ def themes() -> List[str]:
     return _load().get("themes", [])
 
 
+def theme_previews() -> Dict[str, Dict[str, str]]:
+    return _load().get("themePreviews", {})
+
+
 def transitions() -> List[str]:
     return _load().get("transitions", [])
 
@@ -71,7 +75,8 @@ if __name__ == "__main__":  # parity check helper used by the JS test
     out = {
         "features": sorted(features().keys()),
         "defaults": {fid: defaults(fid) for fid in sorted(features().keys())},
-        "themes": themes(), "transitions": transitions(),
+        "themes": themes(), "themePreviews": theme_previews(),
+        "transitions": transitions(),
         "animations": animations(), "imageProviders": image_providers(),
     }
     print(json.dumps(out, separators=(",", ":")))
