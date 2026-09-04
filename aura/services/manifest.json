@@ -13,6 +13,7 @@
         "transition": "fade",
         "speed": "med",
         "animation": "none",
+        "model": "gemini-3.8-flash",
         "images": { "enabled": true, "count": 1, "style": "flat illustration",
                     "provider": "gemini" }
       }

@@ -204,7 +204,9 @@ def _flaky(m, max_tokens=4096):
              "notes": "short"}]}, ""
 spec, note = serve._cli_doc_spec("pptx", "Fats", 8, complete_fn=_flaky)
 rec("first attempt truncated → ONE compact retry succeeds", spec is not None and note == "", str(note))
-rec("pptx outline asks for 8192 tokens", calls and max(calls) == 8192, str(calls))
+rec("pptx outline starts at 8192 tokens", calls and calls[0] == 8192, str(calls))
+rec("truncation retry DOUBLES the budget (same model, larger cap)",
+    calls and calls[-1] == 16384, str(calls))
 rec("retry ran exactly twice", len(calls) == 2, str(len(calls)))
 rec("the rescued deck is real model content",
     spec and spec["slides"][1]["bullets"] == ["one", "two"], "")

@@ -257,6 +257,77 @@ else:
     ok("batteryless env refuses honestly (python-pptx cause, never a fake deck)",
        not r["ok"] and "python-pptx" in r.get("message", ""), r.get("message", "")[:90])
 
+# ══════════════════════════════════════════════════ /doc TERMINAL WIZARD
+sec("TERMINAL /doc WIZARD — numbered questions, manifest defaults, one service")
+pin_prov, pin_model = serve._cli_docgen_pin("pptx")
+ok("docgen pin reads THE manifest model (one source of truth)",
+   pin_prov == "gemini" and pin_model == "gemini-3.8-flash",
+   f"{pin_prov} {pin_model}")
+ok("docx has no pin (chat backend runs it)", serve._cli_docgen_pin("docx") == (None, None))
+
+# design[1] slides[12] images yes[1] count[2] style[3=3d render]
+# provider[2=openai] transition[11=wheel] speed[2=slow] animation[1=bounce]
+answers = iter(["1", "12", "1", "2", "3", "2", "11", "3", "2"])
+wiz = serve._cli_doc_wizard("pptx", input_fn=lambda p: next(answers))
+ok("wizard returns options + slide count",
+   wiz is not None and wiz[1] == 12, str(wiz)[:80])
+opts_w = wiz[0]
+ok("design is the picked theme (1 = professional-dark)",
+   opts_w["theme"] == "professional-dark", opts_w["theme"])
+ok("image answers land (2 images, 3d render, openai)",
+   opts_w["images"]["enabled"] and opts_w["images"]["count"] == 2
+   and opts_w["images"]["style"] == "3d render"
+   and opts_w["images"]["provider"] == "openai", str(opts_w["images"]))
+ok("motion answers land (wheel / slow / bounce)",
+   opts_w["transition"] == "wheel" and opts_w["speed"] == "slow"
+   and opts_w["animation"] == "bounce", str(opts_w))
+
+merged = serve._cli_merge_build_options(serve._cli_build_options("pptx", ""), opts_w)
+ok("wizard answers win over flag defaults",
+   merged["theme"] == "professional-dark" and merged["transition"] == "wheel"
+   and merged["animation"] == "bounce"
+   and merged["images"]["enabled"] is True, str(merged))
+
+# pure pickers: Enter = default, 1-based pick, bad input honest
+def feed(*seq):
+    """Question seam: plays the sequence, then EOFError (cancels, honest)."""
+    it = iter(seq)
+    def fn(p):
+        try:
+            return next(it)
+        except StopIteration:
+            raise EOFError()
+    return fn
+i1 = serve._cli_ask_choice("Q?", ["a", "b", "c"], default_idx=1, input_fn=feed(""))
+ok("Enter picks the default", i1 == 1, str(i1))
+i2 = serve._cli_ask_choice("Q?", ["a", "b"], default_idx=0, input_fn=feed("2"))
+ok("number picks the option (1-based)", i2 == 1, str(i2))
+i3 = serve._cli_ask_choice("Q?", ["a", "b"], default_idx=0, input_fn=feed("9"))
+ok("out-of-range is honest (None)", i3 is None, str(i3))
+n1 = serve._cli_ask_number("N?", 3, 30, 10, input_fn=feed("50"))
+ok("number question returns None out of range", n1 is None, str(n1))
+n2 = serve._cli_ask_number("N?", 3, 30, 10, input_fn=feed(""))
+ok("number question defaults on Enter", n2 == 10, str(n2))
+
+# 3) the preconfigured model reaches the Gemini wire (chat ≠ docgen)
+serve._CLI_API_PROVIDER = ""            # chat is on Ollama…
+serve._CLI_VAT = {"gemini": "fake-key"}  # …but the Gemini key exists
+payload, _, url = serve._cli_api_request(
+    "gemini", "fake-key", [{"role": "user", "content": "x"}],
+    "gemini-3.8-flash", False, 8192, 0.45)
+ok("the pin reaches the Gemini wire URL (model in the path)",
+   "gemini-3.8-flash" in url, url[:90])
+ok("thinking is disabled for outlines (whole budget = output)",
+   payload["generationConfig"].get("thinkingConfig", {}).get("thinkingBudget") == 0
+   and payload["generationConfig"]["maxOutputTokens"] == 8192,
+   str(payload["generationConfig"])[:120])
+
+# 4) manifest model is the single field driving pin + popup + service
+ok("manifest pptx defaults carry the preconfigured model",
+   registry.defaults("pptx").get("model") == "gemini-3.8-flash")
+ok("the pin and the manifest cannot drift",
+   serve._cli_docgen_pin("pptx")[1] == registry.defaults("pptx").get("model"))
+
 print(f"\n\033[36mPASS {len(P)}\033[0m \033[31mFAIL {len(F)}\033[0m")
 if F:
     print("FAILED:", F)

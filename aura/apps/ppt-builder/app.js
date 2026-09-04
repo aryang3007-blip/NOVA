@@ -92,16 +92,13 @@ export async function mount({ root, meta, prefill, ctx, close }) {
   countWrap.append(range, countNum);
   card.append(field({ label: 'Length (slides)', input: countWrap }));
 
-  // ── outline model ──
-  const PROVIDER_LABELS = { gemini: 'Gemini', openai: 'OpenAI', groq: 'Groq',
-                            openrouter: 'OpenRouter', anthropic: 'Anthropic' };
-  const keyed = ['gemini', 'openai', 'groq', 'openrouter', 'anthropic']
-    .filter(id => config?.getKey?.(id));
-  const modelOpts = [{ value: 'auto', label: 'Auto (best configured backend)' }]
-    .concat(keyed.map(id => ({ value: id, label: `${PROVIDER_LABELS[id]} (key saved)` })));
-  const modelSel = select(modelOpts, 'auto');
-  card.append(field({ label: 'Outline model', input: modelSel,
-                      hint: 'No key? Settings → API Keys, or Ollama runs automatically.' }));
+  // ── outline model: ONE preconfigured model (manifest defaults.model) ──
+  const pinModel = d.model || 'gemini-3.8-flash';
+  const pinLine = document.createElement('div');
+  pinLine.className = 'fk-pin';
+  pinLine.innerHTML = `<span class="dot"></span> Outline model: <b>Google Gemini — ${pinModel}</b>
+    <span class="fk-note">(preconfigured for documents · add the Gemini key in Settings → API Keys)</span>`;
+  card.append(pinLine);
 
   // ── AI images ──
   const imgBox = checkbox('Generate AI images and embed them on visual slides',
@@ -143,6 +140,34 @@ export async function mount({ root, meta, prefill, ctx, close }) {
                    field({ label: 'Entrance animation', input: animation }));
   card.append(field({ label: 'Motion', input: motionRow }));
 
+  // ── LIVE PROMPT PREVIEW: exactly what outline() sends (one builder) ──
+  const promptBox = document.createElement('details');
+  promptBox.className = 'fk-prompt';
+  const pSum = document.createElement('summary');
+  pSum.textContent = '👁 VIEW THE PROMPT AURA WILL SEND TO THE MODEL';
+  const pPre = document.createElement('pre');
+  pPre.className = 'fk-prompt-pre';
+  const renderPrompt = async () => {
+    const da = await import('../../js/ai/doc-agent.js');
+    const p = da.buildPrompt({
+      kind: 'pptx',
+      topic: topic.value.trim() || 'Untitled',
+      slides: Math.max(3, Math.min(30, Number(countNum.value) || d.slides || 10)),
+      audience: audience.value.trim(),
+      details: details.value.trim(),
+    });
+    pPre.textContent =
+      `MODEL: gemini — ${pinModel} (preconfigured · thinking disabled · budget escalates on truncation)\n\n`
+      + `──── SYSTEM ────\n${p.system}\n\n──── USER ────\n${p.user}`;
+  };
+  const refreshPrompt = () => { if (promptBox.open) renderPrompt(); };
+  for (const el of [topic, audience, details, countNum]) {
+    el.addEventListener('input', refreshPrompt);
+  }
+  promptBox.addEventListener('toggle', refreshPrompt);
+  promptBox.append(pSum, pPre);
+  card.append(promptBox);
+
   const box = statusBox();
   card.append(box);
 
@@ -162,7 +187,7 @@ export async function mount({ root, meta, prefill, ctx, close }) {
     const topicText = topic.value.trim() || 'Untitled';
     try {
       const docAgent = await import('../../js/ai/doc-agent.js');
-      statusLine(box, `▸ Outlining "${topicText}" (${slides} slides, model: ${modelSel.value})…`);
+      statusLine(box, `▸ Outlining "${topicText}" (${slides} slides, model: ${pinModel} preconfigured)…`);
       const o = await docAgent.outline({
         kind: 'pptx', topic: topicText, engine,
         slides, audience: audience.value.trim() || '',

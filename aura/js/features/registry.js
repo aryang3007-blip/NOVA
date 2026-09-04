@@ -18,7 +18,7 @@ export const FEATURE_MANIFEST = {
                'animation', 'images'],
       defaults: {
         slides: 10, theme: 'professional-dark', transition: 'fade',
-        speed: 'med', animation: 'none',
+        speed: 'med', animation: 'none', model: 'gemini-3.8-flash',
         images: { enabled: true, count: 1, style: 'flat illustration',
                   provider: 'gemini' },
       },

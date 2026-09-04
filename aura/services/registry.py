@@ -70,6 +70,7 @@ if __name__ == "__main__":  # parity check helper used by the JS test
     import sys
     out = {
         "features": sorted(features().keys()),
+        "defaults": {fid: defaults(fid) for fid in sorted(features().keys())},
         "themes": themes(), "transitions": transitions(),
         "animations": animations(), "imageProviders": image_providers(),
     }

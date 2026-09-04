@@ -160,6 +160,56 @@ S('complete/completeJSON — ESCALATION ON HARD FAILURE');
   ok('...and never the banned phrase', !BANNED.test(r2.message));
 }
 
+S('completeJSON — BUDGET ESCALATION + ONE PRECONFIGURED MODEL PIN');
+{
+  config.data.provider = 'openai';           // chat is on OpenAI…
+  config.data.apiKeys = { gemini: 'g' };     // …but docgen must pin Gemini
+  const seen = [];
+  const truncStream = async function* (opts) {
+    seen.push({ model: opts.model, maxTokens: opts.maxTokens });
+    yield '{"slides":[{"title":"Mughal","bullets":["one"';  // always truncated
+  };
+  const r = await router.completeJSON({
+    messages: [{ role: 'user', content: 'x' }],
+    maxTokens: 8192, retries: 1, streamFn: truncStream,
+    provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
+  });
+  ok('docgen pin leads with gemini even though chat is openai',
+     !r.ok && seen.length === 2 && seen.every(s => s.model === 'gemini-3.8-flash'),
+     JSON.stringify(seen));
+  ok('retry DOUBLES the budget (8192 → 16384), same model',
+     seen.map(s => s.maxTokens).join(',') === '8192,16384', JSON.stringify(seen));
+  ok('truncation message still names the true cause', /TRUNCATED|truncated/.test(r.message), r.message);
+
+  // Pin with NO gemini key: honest ladder, never a silent fake.
+  config.data.provider = 'auto';
+  config.data.apiKeys = { openrouter: 'or' };
+  const stream2 = async function* () { yield '{"ok":true}'; };
+  const r2 = await router.completeJSON({
+    messages: [{ role: 'user', content: 'x' }], streamFn: stream2, retries: 0,
+    provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
+  });
+  ok('missing pinned key → ladder runs and reports who did',
+     r2.ok && r2.provider === 'openrouter', `${r2.provider}/${r2.via}`);
+
+  // Offline chat brain selected, but the pin key exists → pin still wins.
+  config.data.provider = 'local';
+  config.data.apiKeys = { gemini: 'g' };
+  const seenL = [];
+  const streamLocal = async function* (o) {
+    seenL.push(o.model);
+    yield JSON.stringify({ title: 'T', slides: [
+      { kind: 'title', title: 'T', bullets: [] },
+      { kind: 'bullets', title: 'A', bullets: ['one', 'two'] }] });
+  };
+  const oL = await docAgent.outline({ kind: 'pptx', topic: 'X', streamFn: streamLocal });
+  ok('offline chat selection does not block the pinned doc model',
+     oL.ok && oL.source === 'gemini' && seenL[0] === 'gemini-3.8-flash',
+     `${oL.source}/${seenL[0]}`);
+  config.data.provider = 'auto';
+  config.data.apiKeys = {};
+}
+
 S('doc-agent — "with: …" EXTRA INSTRUCTIONS');
 {
   const d1 = docAgent.detectDocRequest('create ppt on quantum computing with: history, timeline, comparison');

@@ -116,5 +116,24 @@ for (const app of ['ppt-builder', 'doc-builder', 'research']) {
      Object.keys(js).join(','));
 }
 
+section('ONE prompt builder — popup preview shows EXACTLY what the model gets');
+{
+  const { buildPrompt } = await import('../js/ai/doc-agent.js');
+  const p = buildPrompt({
+    kind: 'pptx', topic: 'Mutual Funds', slides: 10,
+    audience: 'holiday homework', details: 'add a timeline',
+  });
+  ok('system carries shape + rules', /Shape:/.test(p.system) && /Rules:/.test(p.system));
+  ok('user carries topic + slide count + audience + details',
+     /Topic: Mutual Funds/.test(p.user) && /slide count: 10/.test(p.user)
+     && /Audience: holiday homework/.test(p.user) && /timeline/.test(p.user));
+  ok('messages pair is exactly what outline() sends',
+     p.messages.length === 2 && p.messages[0].role === 'system'
+     && p.messages[1].role === 'user');
+  const pDocx = buildPrompt({ kind: 'docx', topic: 'Water cycle', slides: 6 });
+  ok('non-pptx says sections, not slides', /sections/.test(pDocx.system)
+     && /slide/.test(pDocx.system) === false, pDocx.system.slice(0, 60));
+}
+
 console.log(`\n\x1b[36mPASS ${pass}\x1b[0m \x1b[31mFAIL ${fail}\x1b[0m`);
 if (fail) { console.log('FAILED:', fails); process.exit(1); }

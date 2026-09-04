@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import FEATURE_MANIFEST, { feature, defaultsFor } from '../js/features/registry.js';
+import * as router from '../js/ai/router.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -41,6 +42,18 @@ eqList('entrance animations identical', py.animations, FEATURE_MANIFEST.animatio
 eqList('image providers identical (id/kind/model)',
        py.imageProviders.map(p => [p.id, p.kind, p.model]),
        FEATURE_MANIFEST.imageProviders.map(p => [p.id, p.kind, p.model]));
+ok('every default set identical (incl. preconfigured model)',
+   Object.keys(FEATURE_MANIFEST.features).every(id =>
+     JSON.stringify(py.defaults[id]) === JSON.stringify(defaultsFor(id))),
+   `py=${JSON.stringify(py.defaults.pptx?.model)} js=${defaultsFor('pptx').model}`);
+
+section('The ONE preconfigured outline model');
+ok('manifest model === router pin (variablized: one value)',
+   defaultsFor('pptx').model === router.DOCGEN_OUTLINE_MODEL &&
+   defaultsFor('pptx').model === 'gemini-3.8-flash',
+   `${defaultsFor('pptx').model} / ${router.DOCGEN_OUTLINE_MODEL}`);
+ok('pin is discoverable by the terminal through the same manifest',
+   typeof py.defaults?.pptx?.model === 'string' && py.defaults.pptx.model.length > 5);
 
 section('JS helper surface used by the popups');
 for (const id of ['pptx', 'docx', 'xlsx', 'research']) {

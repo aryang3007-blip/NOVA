@@ -41,6 +41,21 @@ const MODAL_CSS = `
 .fk-line.err { color: var(--danger, #ff5470); }
 .feature-actions { display: flex; gap: .6rem; margin-top: .9rem; align-items: center; }
 .feature-actions .fk-note { font-size: .66rem; opacity: .7; }
+.fk-pin { display: flex; align-items: center; gap: .45rem; margin: .55rem 0; font-size: .8rem;
+  background: rgba(var(--accent-rgb), .07); border: 1px solid var(--panel-brd, rgba(148,175,205,.16));
+  border-radius: 8px; padding: .5rem .6rem; }
+.fk-pin .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok, #34d399);
+  box-shadow: 0 0 8px rgba(52,211,153,.7); flex: none; }
+.fk-pin b { color: var(--text, #e8eef5); font-weight: 600; }
+.fk-pin .fk-note { margin-left: auto; }
+.fk-prompt { margin: .55rem 0; border: 1px solid var(--panel-brd, rgba(148,175,205,.16));
+  border-radius: 10px; background: var(--bg-3, #0a0e16); }
+.fk-prompt summary { cursor: pointer; padding: .5rem .6rem; font-size: .68rem; letter-spacing: .1em;
+  color: var(--dim, #7d8da3); user-select: none; }
+.fk-prompt summary:hover { color: var(--text, #e8eef5); }
+.fk-prompt-pre { margin: 0; padding: .6rem; max-height: 220px; overflow: auto; white-space: pre-wrap;
+  word-break: break-word; font-family: var(--mono, monospace); font-size: .62rem; line-height: 1.6;
+  color: var(--text, #e8eef5); border-top: 1px solid var(--panel-brd, rgba(148,175,205,.16)); }
 `;
 
 let _stylesInjected = false;

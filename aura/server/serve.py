@@ -1152,6 +1152,17 @@ def _cli_active_backend():
             "model": model_name}
 
 
+def _cli_docgen_backend(kind):
+    """Effective backend for /doc: the preconfigured pin when its key exists,
+    otherwise whatever the terminal is on (honest label either way)."""
+    pp, pm = _cli_docgen_pin(kind)
+    if pp and _cli_vault_key(pp):
+        meta = CLI_API_PROVIDERS.get(pp, {"label": pp})
+        return {"mode": "api", "provider": pp, "label": meta["label"],
+                "model": pm, "pin": True}
+    return _cli_active_backend()
+
+
 def _cli_resolve_path(target, must_exist=True):
     """
     Safe path resolver for CLI /doc when the action bridge is off.
@@ -1303,18 +1314,23 @@ def _cli_api_stream(provider_id, messages, on_delta, max_tokens=2048, urlopen_fn
         return 503, f"{meta['label']} request failed: {e}"
 
 
-def _cli_complete_json(messages, max_tokens=4096, timeout=300, urlopen_fn=None):
+def _cli_complete_json(messages, max_tokens=4096, timeout=300, urlopen_fn=None,
+                       provider=None, model=None):
     """
     One non-streaming completion, decoded to JSON.
-    Returns (obj|None, note). note is '' on success, else the TRUE cause.
+    `provider`/`model` are the per-call DOCGEN PIN (the preconfigured outline
+    model) — they override the chat backend for document generation, exactly
+    like the app. Returns (obj|None, note); note is '' on success, else the
+    TRUE cause.
     """
-    if _CLI_API_PROVIDER:
-        meta = CLI_API_PROVIDERS[_CLI_API_PROVIDER]
-        key = _cli_vault_key(_CLI_API_PROVIDER)
+    provider = provider or _CLI_API_PROVIDER
+    if provider:
+        meta = CLI_API_PROVIDERS[provider]
+        key = _cli_vault_key(provider)
         if not key:
             return None, f"No {meta['label']} key in the vault."
-        model = _CLI_API_MODEL or meta["default_model"]
-        payload, headers, url = _cli_api_request(_CLI_API_PROVIDER, key, messages,
+        model = model or _CLI_API_MODEL or meta["default_model"]
+        payload, headers, url = _cli_api_request(provider, key, messages,
                                                  model, False, max_tokens, 0.45)
         try:
             opener = urlopen_fn or urllib.request.urlopen
@@ -1571,9 +1587,194 @@ def _cli_build_options(kind, arg=""):
     return opts
 
 
+def _cli_ask_choice(prompt, options, default_idx=None, input_fn=None):
+    """Numbered option question, same style as the /model picker:
+       '1' → options[0]; Enter → default. input_fn is the test seam.
+       Returns the chosen INDEX, default_idx on Enter, None on cancel/EOF."""
+    inp = input_fn or input
+    say(f"  ? {prompt}")
+    for i, opt in enumerate(options, 1):
+        mark = "  (default)" if default_idx is not None and i - 1 == default_idx else ""
+        say(f"    [{i}] {opt}{mark}")
+    default_label = str((default_idx or 0) + 1) if default_idx is not None else "—"
+    while True:
+        try:
+            raw = inp(f"  Choose 1-{len(options)} (Enter={default_label}): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        if not raw:
+            return default_idx
+        if _cli_pick_entry(options, raw) is not None:
+            return options.index(_cli_pick_entry(options, raw))
+        say(c(31, f"  '{raw}' is not a valid pick — enter 1-{len(options)} or press Enter."))
+
+
+def _cli_ask_number(prompt, lo, hi, default, input_fn=None):
+    """Plain number question with a safe default (Enter = default)."""
+    inp = input_fn or input
+    while True:
+        try:
+            raw = inp(f"  ? {prompt} (Enter={default}): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        if not raw:
+            return default
+        try:
+            n = int(raw)
+        except ValueError:
+            say(c(31, f"  '{raw}' is not a number."))
+            continue
+        if lo <= n <= hi:
+            return n
+        say(c(31, f"  '{n}' is out of range — {lo}-{hi}."))
+
+
+def _cli_doc_wizard(kind, slides=0, input_fn=None):
+    """
+    Interactive /doc questions (the popup, in terminal form — same knobs,
+    same manifest defaults, same canonical options):
+      pptx → design, slide count, AI images (count/style/provider), motion
+      docx/xlsx → section/sheet count
+    Returns (options_dict, slides) or None when cancelled.
+    input_fn is the test seam; the real terminal uses input().
+    """
+    try:
+        from services import registry as _reg
+        from services.docgen import images as _img
+    except Exception:
+        _reg = None
+        _img = None
+
+    inp = input_fn or input
+    say(c(36, "\n  ── /doc OPTIONS (Enter = default) ──────────────────────────────"))
+    opts = {"theme": "", "transition": "fade", "speed": "med", "animation": "none",
+            "images": {"enabled": False, "count": 1, "style": "flat illustration",
+                       "provider": "gemini"}}
+    if kind != "pptx":
+        default_n = 6 if kind == "docx" else 1
+        n = _cli_ask_number(f"{kind.upper()} sections/sheets", 1, 40,
+                            slides or default_n, input_fn=inp)
+        if n is None:
+            return None
+        return opts, n
+
+    # ── design ──
+    themes = list(_reg.themes()) if _reg else ["professional-dark"]
+    d = 0
+    try:
+        d = themes.index("professional-dark")
+    except ValueError:
+        pass
+    pick = _cli_ask_choice("What design?", themes, default_idx=d, input_fn=inp)
+    if pick is None:
+        return None
+    opts["theme"] = themes[pick]
+
+    # ── length ──
+    n = _cli_ask_number("How many slides?", 3, 30, slides or 10, input_fn=inp)
+    if n is None:
+        return None
+
+    # ── AI images ──
+    img_yes = _cli_ask_choice("Generate AI images (embedded on visual slides)?",
+                              ["yes", "no"], default_idx=0, input_fn=inp)
+    if img_yes is None:
+        return None
+    if img_yes == 0:
+        cnt = _cli_ask_number("How many images?", 1, 3, 1, input_fn=inp)
+        if cnt is None:
+            return None
+        styles = list(_img.STYLE_HINTS.keys()) if _img else ["flat illustration"]
+        style_i = _cli_ask_choice("Image style?", styles, default_idx=0, input_fn=inp)
+        if style_i is None:
+            return None
+        provs = [p["id"] for p in (_reg.image_providers() if _reg else [])] or ["gemini", "openai"]
+        prov_i = _cli_ask_choice("Image provider?", provs, default_idx=0, input_fn=inp)
+        if prov_i is None:
+            return None
+        opts["images"] = {"enabled": True, "count": cnt, "style": styles[style_i],
+                          "provider": provs[prov_i]}
+
+    # ── motion (like PowerPoint's ease: transition + entrance) ──
+    trans = list(_reg.transitions()) if _reg else ["fade"]
+    t_i = _cli_ask_choice("Slide transition?", trans,
+                          default_idx=trans.index("fade") if "fade" in trans else 0, input_fn=inp)
+    if t_i is None:
+        return None
+    opts["transition"] = trans[t_i]
+    s_i = _cli_ask_choice("Transition speed?", ["fast", "med", "slow"], default_idx=1, input_fn=inp)
+    if s_i is None:
+        return None
+    opts["speed"] = ["fast", "med", "slow"][s_i]
+    anims = list(_reg.animations()) if _reg else ["none"]
+    a_i = _cli_ask_choice("Entrance animation?", anims,
+                          default_idx=anims.index("none") if "none" in anims else 0, input_fn=inp)
+    if a_i is None:
+        return None
+    opts["animation"] = anims[a_i]
+    return opts, n
+
+
+def _cli_merge_build_options(base, wizard):
+    """Wizard answers win over the flag-parsed defaults (flags still parse
+    when the terminal is piped/non-interactive). Images merge by field."""
+    out = dict(base or {})
+    w = wizard or {}
+    out["theme"] = w.get("theme") or out.get("theme") or ""
+    if w.get("transition"):
+        out["transition"] = w["transition"]
+    if w.get("speed"):
+        out["speed"] = w["speed"]
+    if w.get("animation"):
+        out["animation"] = w["animation"]
+    if w.get("images", {}).get("enabled"):
+        out["images"] = {**out.get("images", {}), **w["images"]}
+    return out
+
+
+def _cli_describe_options(opts, kind, slides=0):
+    """One-line confirmation of the choices (the terminal equivalent of the
+    popup's selected knobs)."""
+    if kind != "pptx":
+        say(f"  {c(37, 'Choices:')} {slides or 0} segment(s) · defaults for the rest")
+        return
+    img = opts.get("images") or {}
+    parts = []
+    if opts.get("theme"):
+        parts.append(f"design: {opts['theme']}")
+    if slides:
+        parts.append(f"{slides} slides")
+    parts.append(f"transition: {opts.get('transition', 'fade')} ({opts.get('speed', 'med')})")
+    parts.append(f"animation: {opts.get('animation', 'none')}")
+    if img.get("enabled"):
+        parts.append(f"images: {img.get('count')} ({img.get('style')}, {img.get('provider')})")
+    say(f"  {c(37, 'You chose:')} " + " · ".join(parts))
+
+
+def _cli_docgen_pin(kind):
+    """
+    ONE preconfigured outline model (user's decision): document generation
+    asks THE model — gemini-3.8-flash (newest stable, writes text + json +
+    image prompts) — no matter what chat backend the terminal is on.
+    Reads the model id from the MANIFEST (services/manifest.json), so the
+    terminal, app and tests cannot drift. Returns (provider, model) or
+    (None, None) when the manifest has no pin.
+    """
+    if kind != "pptx":
+        return None, None
+    try:
+        from services import registry as _reg
+        model = _reg.defaults("pptx").get("model") or ""
+    except Exception:
+        model = ""
+    return ("gemini", model) if model else (None, None)
+
+
 def _cli_doc_spec(kind, topic, slides=0, audience="", details="", complete_fn=None):
     """
-    Ask the ACTIVE backend (API provider or Ollama) for a real outline.
+    Ask a model for a real outline. Document generation uses the
+    preconfigured pin (_cli_docgen_pin) when its key exists; otherwise the
+    active chat backend runs and the honest note says so.
     Returns (spec|None, note); note is '' on success, else the honest cause.
     `complete_fn` is a test seam for _cli_complete_json.
     """
@@ -1597,10 +1798,20 @@ def _cli_doc_spec(kind, topic, slides=0, audience="", details="", complete_fn=No
     usr = f"Topic: {topic}\n" + (f"Extra instructions: {details}\n" if details else "") + "Produce the JSON now."
     messages = [{"role": "system", "content": sys_p}, {"role": "user", "content": usr}]
     max_tokens = 8192 if kind == "pptx" else 4096
-    obj, note = (complete_fn or _cli_complete_json)(messages, max_tokens=max_tokens)
+    # Docgen pin: the preconfigured outline model leads; test seams skip it.
+    pin_provider, pin_model = _cli_docgen_pin(kind)
+    use_pin = bool(pin_provider and complete_fn is None and _cli_vault_key(pin_provider))
+    if use_pin:
+        _cli_doc_spec_pin = {"provider": pin_provider, "model": pin_model}
+    else:
+        _cli_doc_spec_pin = {}
+    call = lambda msgs, **kw: (complete_fn or _cli_complete_json)(
+        msgs, **{**_cli_doc_spec_pin, **kw})
+    obj, note = call(messages, max_tokens=max_tokens)
     if note:
-        # One bounded safety retry when the outline was cut off: tighter deck,
-        # same backend — a real 9-slide deck beats the offline template.
+        # One bounded retry when the outline was cut off: TIGHTER deck AND
+        # DOUBLE the output budget (same model first — a real deck beats the
+        # offline template; backend escalation stays the last resort).
         if "TRUNCATED" in note or "prose" in note.lower() or "empty" in note.lower():
             tight_sys = sys_p.replace(
                 "8-12 content slides", "6-9 content slides").replace(
@@ -1608,12 +1819,12 @@ def _cli_doc_spec(kind, topic, slides=0, audience="", details="", complete_fn=No
             tight_sys += ("\nCRITICAL: fit the ENTIRE JSON in one reply. If space runs low, "
                           "prefer fewer slides and shorter bullets over an incomplete object. "
                           "Speaker notes: one short sentence only.")
-            obj, note2 = (complete_fn or _cli_complete_json)(
+            obj, note2 = call(
                 [{"role": "system", "content": tight_sys}, {"role": "user", "content": usr}],
-                max_tokens=max_tokens)
+                max_tokens=min(65536, max_tokens * 2))
             if obj:
                 return obj, ""
-            note = f"{note} (retried with a tighter deck: {note2})"
+            note = f"{note} (retried with a tighter deck and a larger budget: {note2})"
         return None, note
     if not isinstance(obj, dict):
         return None, "The model returned JSON that was not an object."
@@ -1773,9 +1984,25 @@ def _terminal_repl_loop():
                             say(c(31, f"\n  ✗ {kind.upper()} generation needs a Python library: {caps.get('install', {}).get(kind, 'pip install')}\n"))
                             continue
 
+                        # ── INTERACTIVE OPTIONS (same knobs as the app popup,
+                        #    asked as numbered questions like the /model picker).
+                        #    Skipped when stdin is piped, so scripts/tests and
+                        #    the live preview server never block.
+                        wizard_opts = None
+                        if sys.stdin.isatty():
+                            _w = _cli_doc_wizard(kind, slides)
+                            if _w is None:
+                                say(c(31, "\n  /doc cancelled.\n"))
+                                continue
+                            wizard_opts, slides = _w
+
                         say(f"\n  {c(33, '⚡ Generating')} {kind.upper()} for: {c(36, topic)}...")
-                        backend = _cli_active_backend()
-                        say(f"  {c(37, 'Backend:')} {backend['label']} ({backend['model']})")
+                        backend = _cli_docgen_backend(kind)
+                        say(f"  {c(37, 'Backend:')} {backend['label']} ({backend['model']})"
+                            + ("  · preconfigured for documents" if backend.get("pin") else ""))
+                        if wizard_opts:
+                            _cli_describe_options(_cli_merge_build_options(
+                                _cli_build_options(kind, arg), wizard_opts), kind, slides)
 
                         # REAL MODEL OUTLINE via the active backend; honest
                         # offline-template fallback with the TRUE reason.
@@ -1797,10 +2024,13 @@ def _terminal_repl_loop():
                         else:
                             say(c(37, "  Outline: offline template — no model ran."))
                         # ── CANONICAL BUILD: same services.docgen.service the
-                        #    app bridge calls. Feature knobs come from flags:
+                        #    app bridge calls. Feature knobs come from the
+                        #    wizard answers (interactive) or flags:
                         #    --theme holiday --transition push --animation bounce
                         #    --images 2 --style "3d render"
                         build_opts = _cli_build_options(kind, arg)
+                        if wizard_opts:
+                            build_opts = _cli_merge_build_options(build_opts, wizard_opts)
                         try:
                             from services.docgen import service as _ds
                             res = _ds.generate(kind, spec,

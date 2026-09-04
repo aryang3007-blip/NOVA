@@ -222,21 +222,39 @@ export function needsResearch(text) {
   return /\b(today|tonight|this (week|month|year)|latest|recent|current|currently|news|update[ds]?|202[4-9]|price|stock|market|score|weather|who won|announce[ds]?|release[d]?)\b/i.test(t);
 }
 
-const SYS = (kind, { slides = 0, audience = '' } = {}) => {
-  const k = DOC_KINDS[kind];
-  return (kind === 'pptx'
+/**
+ * The ONE prompt builder — the popup's "Prompt preview" shows EXACTLY this,
+ * and outline() sends EXACTLY this. Never build the system/user messages
+ * anywhere else (variablized: app, engine, tests all see the same prompt).
+ *
+ * @param {{kind:string, topic:string, slides?:number, audience?:string,
+ *          details?:string, digest?:string}} o
+ * @returns {{system:string, user:string, messages:Array}}
+ */
+export function buildPrompt({ kind, topic, slides = 0, audience = '', details = '', digest = '' } = {}) {
+  const k = DOC_KINDS[kind] || {};
+  const system = (kind === 'pptx'
     ? 'You are a world-class presentation designer (think Gamma/McKinsey decks). '
     : 'You are a document outliner. ')
     + 'Reply with ONE JSON object and nothing else — no prose, no markdown fence, no explanation.\n\n'
-    + `Shape: ${k.schema}\n\n`
-    + `Rules: ${k.rules}\n`
+    + `Shape: ${k.schema || '{}'}\n\n`
+    + `Rules: ${k.rules || ''}\n`
     + (slides
         ? `The user asked for ${slides} ${kind === 'pptx' ? 'slides' : 'sections'}. ` +
           `Deliver as close to that as the content allows.\n`
         : '')
     + (audience ? `Audience: ${audience}. Pitch vocabulary, depth and examples to them.\n` : '')
     + 'Every string must be plain text.';
-};
+  const user = [
+    `Topic: ${topic}`,
+    audience ? `Audience: ${audience}` : '',
+    slides ? `Requested ${kind === 'pptx' ? 'slide' : 'section'} count: ${slides}` : '',
+    details ? `Extra instructions from the user — honour every one of them: ${details}` : '',
+    digest ? `\nResearch digest (ground the content in this; cite sources on the references slide):\n${digest}` : '',
+    '\nProduce the JSON now.',
+  ].filter(Boolean).join('\n');
+  return { system, user, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+}
 
 /**
  * Ask the CONFIGURED provider for an outline. Provider truth: router reads
@@ -277,9 +295,10 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
   }
 
   const sel = router.resolveChat(eng);
-  // 'ollama' with nothing installed → the router still resolves it; the
-  // attempt will fail and fall back honestly below.
-  if (sel.provider === 'local') {
+  // Offline chat brain is honoured — UNLESS the preconfigured docgen pin has
+  // a key: document generation still asks the pinned model (user's decision).
+  const hasPinKey = !!(config.getKey?.('gemini') || config.data?.apiKeys?.gemini);
+  if (sel.provider === 'local' && !hasPinKey) {
     return { ok: true, spec: outlineFallback(kind, topic), source: 'offline-template' };
   }
   // Only a local model is available. Remember that so a failure can say the
@@ -290,22 +309,19 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
     ? ` ${behind.reason}`
     : '';
 
-  const usrParts = [
-    `Topic: ${topic}`,
-    audience ? `Audience: ${audience}` : '',
-    slides ? `Requested ${kind === 'pptx' ? 'slide' : 'section'} count: ${slides}` : '',
-    details ? `Extra instructions from the user — honour every one of them: ${details}` : '',
-    digest ? `\nResearch digest (ground the content in this; cite sources on the references slide):\n${digest}` : '',
-    '\nProduce the JSON now.',
-  ].filter(Boolean);
-  const messages = [
-    { role: 'system', content: SYS(kind, { slides, audience }) },
-    { role: 'user', content: usrParts.join('\n') },
-  ];
+  const prompt = buildPrompt({
+    kind, topic, slides, audience, details, digest,
+  });
+  const messages = prompt.messages;
 
+  // ONE preconfigured outline model (user's decision): docgen always asks
+  // gemini-3.8-flash first, no matter what chat model is set. It is the
+  // newest stable model; it writes json, text and image prompts. If that
+  // key is missing the ladder falls back honestly (via reports it).
   const r = await router.completeJSON({
     messages, engine: eng, streamFn, temperature: 0.45,
     maxTokens: kind === 'pptx' ? 8192 : 4096, timeoutMs, retries: 1,
+    provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
   });
 
   const attach = (s) => {
@@ -348,7 +364,9 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
     if (attached.placed) spec = attached.spec;
   }
 
-  return { ok: true, spec, source: `${r.via === 'selected' ? '' : 'fallback:'}${r.provider}`,
+  // 'doc-pin' is the preconfigured outline model, not a fallback: it is the
+  // intended first choice and gets NO fallback: prefix.
+  return { ok: true, spec, source: `${['selected', 'doc-pin'].includes(r.via) ? '' : 'fallback:'}${r.provider}`,
            model: r.model, deckReport, researched,
            imagesPlaced: kind === 'pptx' ? (imageSources || []).slice(0, 3).length : 0 };
 }
@@ -427,6 +445,7 @@ export async function repairDeck(spec, report, { topic, audience = '', eng = nul
   const r = await router.completeJSON({
     messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }],
     engine: eng, streamFn, temperature: 0.45, maxTokens: 2048, timeoutMs, retries: 0,
+    provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,  // same preconfigured pin
   });
   if (!r.ok || !r.json || !Array.isArray(r.json.slides)) return null;
   try {

@@ -43,6 +43,15 @@ export const FALLBACK_ORDER = ['gemini', 'openrouter', 'openai', 'groq', 'anthro
 /** How many candidates to hand back before we stop escalating. */
 export const MAX_CANDIDATES = 3;
 
+/**
+ * ONE preconfigured outline model for document generation (the user's
+ * decision): deck/word/spreadsheet outlines are mechanical JSON and
+ * gemini-3.8-flash is the newest stable model the machine is configured
+ * with. Pinned for docgen ONLY; chat stays on the Settings selection.
+ * Mirror: services/manifest.json features.pptx.defaults.model (parity test).
+ */
+export const DOCGEN_OUTLINE_MODEL = 'gemini-3.8-flash';
+
 function keyReady(p, cfg) {
   return p && (!p.needsKey || cfg.getKey(p.id));
 }
@@ -188,8 +197,9 @@ export function describeJsonFailure({ provider = 'model', model = '', raw = '', 
     // The exact truncation signature: an opening brace that never closes.
     const tail = text.slice(-40).replace(/\s+/g, ' ');
     return `${who} TRUNCATED the JSON mid-stream — got ${text.length} chars, the object never closes `
-      + `(last text: “${tail}…”). Usually the model hit its output cap; a shorter deck or larger `
-      + `num_predict fixes it. Retrying on the next candidate backend…`;
+      + `(last text: “${tail}…”). Usually the model hit its output cap; a larger output budget (or `
+      + `shorter deck) fixes it. AURA retries the SAME model with double the budget first, and only `
+      + `then escalates backends…`;
   }
   return `${who} replied with prose instead of the requested JSON `
     + `(first 60 chars: “${text.slice(0, 60).replace(/\s+/g, ' ')}…”). The system prompt asked for a bare object.`;
@@ -209,17 +219,38 @@ export function describeJsonFailure({ provider = 'model', model = '', raw = '', 
  * @param {any}    [o.engine]       AIEngine for its resolved pair
  * @param {number} [o.temperature]
  * @param {number} [o.maxTokens]
+ * @param {string} [o.provider]     provider PIN (docgen) — this provider
+ *                                  leads with o.model, whatever the chat
+ *                                  selection says. Falls through to the
+ *                                  normal ladder if its key is missing.
+ * @param {string} [o.model]        model for the pinned provider
  * @param {number} [o.timeoutMs]
  * @param {Function} [o.streamFn]   test seam — replaces provider.stream
  * @returns {Promise<{ok:boolean, text:string, provider:string, model:string,
  *          via:string, message?:string}>}
  */
 export async function complete({ messages, engine = null, temperature = 0.4,
-                                 maxTokens = 2048, timeoutMs = 90000, streamFn = null }) {
+                                 maxTokens = 2048, timeoutMs = 90000, streamFn = null,
+                                 model = '', provider = '' } = {}) {
   const targets = candidateTargets(engine, { modelOverride: '' });
   if (!targets.length) {
     const u = usableBackend(engine);
     return { ok: false, text: '', provider: 'none', model: '', via: 'none', message: u.reason };
+  }
+  if (provider) {
+    // Docgen pin: the ONE preconfigured model leads, then the ladder.
+    const p = getProvider(provider);
+    if (keyReady(p, config)) {
+      const i = targets.findIndex(t => t.id === provider);
+      const t = { id: provider, p, model: model || p.defaultModel || '',
+                  key: config.getKey(provider), via: 'doc-pin' };
+      if (i >= 0) targets.splice(i, 1);
+      targets.unshift(t);
+      targets.length = Math.min(targets.length, MAX_CANDIDATES);
+    }
+  } else if (model && targets[0].id === 'gemini' && targets[0].model !== model) {
+    // Legacy soft pin: swap the model on the selected gemini candidate only.
+    targets[0] = { ...targets[0], model };
   }
   let lastErr = null;
   for (const target of targets) {
@@ -248,18 +279,25 @@ export async function complete({ messages, engine = null, temperature = 0.4,
 
 /**
  * complete() + lenient JSON extraction (repairs the malformations real
- * models produce). One automatic repair retry on empty parse. Failures are
- * described by describeJsonFailure — the true cause, never a generic phrase.
+ * models produce). Retries are BUDGET ESCALATIONS on the same backend — the
+ * variablized "larger num_predict fixes it" fix: attempt n asks for
+ * maxTokens * 2^n (capped 65536), so a model that truncates a long deck
+ * outline gets a second chance with room to finish before AURA gives up or
+ * drops to a fallback. Failures are described by describeJsonFailure — the
+ * true cause, never a generic phrase.
  *
  * @returns {Promise<{ok:boolean, json:any, provider:string, model:string,
  *          via:string, raw:string, message?:string}>}
  */
 export async function completeJSON({ messages, engine = null, temperature = 0.2,
                                      maxTokens = 2048, timeoutMs = 90000, streamFn = null,
-                                     retries = 1 } = {}) {
+                                     retries = 1, model = '', provider = '' } = {}) {
+  const CAP = 65536;
   let last = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const r = await complete({ messages, engine, temperature, maxTokens, timeoutMs, streamFn });
+    const budget = Math.min(CAP, Math.round(maxTokens * (2 ** attempt)));
+    const r = await complete({ messages, engine, temperature, maxTokens: budget,
+                               timeoutMs, streamFn, model, provider });
     last = r;
     if (!r.ok || !r.text) continue;
     const json = extractJson(r.text);
@@ -273,4 +311,5 @@ export async function completeJSON({ messages, engine = null, temperature = 0.2,
 }
 
 export default { TASK, resolveChat, complete, completeJSON, candidateTargets,
-                 usableBackend, describeJsonFailure, FALLBACK_ORDER, MAX_CANDIDATES };
+                 usableBackend, describeJsonFailure, FALLBACK_ORDER, MAX_CANDIDATES,
+                 DOCGEN_OUTLINE_MODEL };
