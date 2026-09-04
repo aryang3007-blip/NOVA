@@ -76,6 +76,10 @@ const MODAL_CSS = `
 .fk-prov-models { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .4rem; }
 .fk-prov-model { font-size: .56rem; padding: .12rem .4rem; border-radius: 5px;
   background: rgba(148,175,205,.1); color: var(--dim, #7d8da3); }
+/* the IMAGES-ONLY key entry — strict: separate from the outline/chat key */
+.fk-imgkey { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; }
+.fk-imgkey input { flex: 1; min-width: 140px; }
+.fk-imgkey .fk-tag { white-space: nowrap; }
 .fk-status { margin-top: .8rem; max-height: 150px; overflow-y: auto;
   font-family: var(--mono, monospace); font-size: .68rem; line-height: 1.7;
   background: rgba(0,0,0,.25); border-radius: 8px; padding: .5rem .6rem; }

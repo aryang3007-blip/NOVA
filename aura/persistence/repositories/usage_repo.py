@@ -20,6 +20,8 @@ DEFAULT_BUDGET = {
     "enabled": True,
     "requestsPerDay": 60,   # 0 = unlimited
     "imagesPerDay": 5,      # 0 = unlimited — images cost the most
+    "imageIntervalSec": 5,  # min seconds between image calls on one key
+                            # (RPM guard — 0 = off)
 }
 
 
@@ -113,6 +115,7 @@ class UsageRepository:
             "enabled": bool(budget.get("enabled", DEFAULT_BUDGET["enabled"])),
             "requestsPerDay": max(0, int(budget.get("requestsPerDay", 60))),
             "imagesPerDay": max(0, int(budget.get("imagesPerDay", 5))),
+            "imageIntervalSec": max(0, int(budget.get("imageIntervalSec", 5))),
         }
         conn = self.manager.get_connection()
         with conn:

@@ -41,41 +41,45 @@ export async function renderKeysSpend(host, { toast = () => {} } = {}) {
   keysCard.append(el('h3', 'ks-h', '🔑 API KEYS'));
   keysCard.append(el('p', 'ks-sub',
     'Keys are stored in this browser and mirrored into the encrypted OS vault. '
-    + 'Changing one here is enough — chat, PDFs and image generation all use it.'));
+    + 'Chat + outlines use the provider keys; each IMAGES-ONLY row below is a '
+    + 'SECOND key used strictly for image creation — two keys, two RPM budgets.'));
 
   const aiProviders = providerList().filter(p => p.needsKey);
   const imageProviders = FEATURE_MANIFEST.imageProviders || [];
   const keyRows = [];
-  const addKeyRow = (prov, theme = 'ai') => {
-    const has = !!config.getKey(prov.id);
+  const addKeyRow = (prov, theme = 'ai', keyId = null) => {
+    // keyId is the VAULT slot: image providers get their own slot so the
+    // images-only key is STRICTLY separate from the chat/outline key.
+    const slot = keyId || prov.id;
+    const has = !!config.getKey(slot);
     const row = el('div', 'ks-row');
     const meta = el('div', 'ks-kmeta');
     meta.append(el('b', '', prov.label));
     const pos = el('span', `ks-kstatus ${has ? 'ok' : 'warn'}`, has ? '✓ SET' : '✗ NO KEY');
     meta.append(pos);
-    if (theme === 'image') meta.append(el('span', 'ks-ktag', 'IMAGES'));
+    if (theme === 'image') meta.append(el('span', 'ks-ktag', 'IMAGES ONLY'));
     row.append(meta);
 
     const inputs = el('div', 'ks-kinputs');
     const input = el('input', 'ks-input');
     input.type = 'password';
-    input.placeholder = has ? redact(config.getKey(prov.id)) : `paste ${prov.label} key…`;
+    input.placeholder = has ? redact(config.getKey(slot)) : `paste ${prov.label} key…`;
     input.autocomplete = 'off';
     const save = el('button', 'btn ks-btn', 'SAVE');
     const rm = el('button', 'btn ghost ks-btn', 'REMOVE');
     save.addEventListener('click', () => {
       const v = input.value.trim();
       if (!v) { toast('info', `${prov.label}: paste a key first — no empty saves.`); return; }
-      config.setKey(prov.id, v);
+      config.setKey(slot, v);
       input.value = '';
       input.placeholder = redact(v);
       input.type = 'password';
       input.setAttribute('data-has', '1');
       pos.textContent = '✓ SET'; pos.className = 'ks-kstatus ok';
-      toast('success', `${prov.label} key saved (browser + vault).`);
+      toast('success', `${prov.label} key saved under '${slot}' (browser + vault).`);
     });
     rm.addEventListener('click', () => {
-      config.setKey(prov.id, '');
+      config.setKey(slot, '');
       input.value = '';
       input.placeholder = `paste ${prov.label} key…`;
       pos.textContent = '✗ NO KEY'; pos.className = 'ks-kstatus warn';
@@ -87,8 +91,12 @@ export async function renderKeysSpend(host, { toast = () => {} } = {}) {
     return row;
   };
   for (const p of aiProviders) keysCard.append(addKeyRow(p));
+  // Images always get their OWN row — even when the chat row exists for the
+  // same provider (openai): strict separation is the whole point.
   for (const p of imageProviders) {
-    if (!aiProviders.some(a => a.id === p.id)) keysCard.append(addKeyRow({ ...p, label: p.label }, 'image'));
+    keysCard.append(addKeyRow(
+      { label: `${p.label} (image key)` },
+      'image', p.keyId || p.id));
   }
   host.append(keysCard);
 
@@ -114,9 +122,14 @@ export async function renderKeysSpend(host, { toast = () => {} } = {}) {
   const imgInput = el('input', 'ks-input');
   imgInput.type = 'number'; imgInput.min = '0';
   imgRow.append(imgInput);
+  const paceRow = el('label', 'ks-field');
+  paceRow.append(el('span', '', 'Sec between images (RPM)'));
+  const paceInput = el('input', 'ks-input');
+  paceInput.type = 'number'; paceInput.min = '0'; paceInput.step = '1';
+  paceRow.append(paceInput);
   const saveBudget = el('button', 'btn', 'SAVE BUDGET');
   const status = el('span', 'ks-status');
-  budgetForm.append(enabledRow, reqRow, imgRow, saveBudget, status);
+  budgetForm.append(enabledRow, reqRow, imgRow, paceRow, saveBudget, status);
   budgetCard.append(budgetForm);
   host.append(budgetCard);
 
@@ -150,6 +163,7 @@ export async function renderKeysSpend(host, { toast = () => {} } = {}) {
       enabled.checked = !!b.enabled;
       reqInput.value = b.requestsPerDay ?? 0;
       imgInput.value = b.imagesPerDay ?? 0;
+      paceInput.value = b.imageIntervalSec ?? 5;
     }
     const today = summary?.today || { total: 0, images: 0, errors: 0, providers: {} };
     const provs = Object.entries(today.providers || {});
@@ -202,11 +216,12 @@ export async function renderKeysSpend(host, { toast = () => {} } = {}) {
       enabled: enabled.checked,
       requestsPerDay: Math.max(0, parseInt(reqInput.value, 10) || 0),
       imagesPerDay: Math.max(0, parseInt(imgInput.value, 10) || 0),
+      imageIntervalSec: Math.max(0, parseInt(paceInput.value, 10) || 0),
     };
     const ok = await pc?.setBudget?.(budget);
     status.textContent = ok ? '✓ saved — enforced from the next call' : '✗ could not save (DB offline?)';
     status.className = 'ks-status ' + (ok ? 'ok' : 'warn');
-    if (ok) toast('success', `Budget set: ${budget.requestsPerDay} requests / ${budget.imagesPerDay} images per day.`);
+    if (ok) toast('success', `Budget set: ${budget.requestsPerDay} requests / ${budget.imagesPerDay} images, ${budget.imageIntervalSec}s between images.`);
     refresh();
   });
   backupBtn.addEventListener('click', async () => {

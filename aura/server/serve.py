@@ -1674,6 +1674,16 @@ def _cli_ask_choice(prompt, options, default_idx=None, input_fn=None):
         say(c(31, f"  '{raw}' is not a valid pick — enter 1-{len(options)} or press Enter."))
 
 
+def _cli_ask_text(prompt, default="", input_fn=None):
+    """One-line text question (Enter = default). Returns None on cancel."""
+    inp = input_fn or input
+    try:
+        raw = inp(f"  ? {prompt}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    return raw or str(default)
+
+
 def _cli_ask_number(prompt, lo, hi, default, input_fn=None):
     """Plain number question with a safe default (Enter = default)."""
     inp = input_fn or input
@@ -1776,6 +1786,23 @@ def _cli_doc_wizard(kind, slides=0, input_fn=None):
             if m_i is None:
                 return None
             img_opts["model"] = model_opts[m_i]["id"]
+        # ── IMAGES-ONLY KEY (strict separation, same rule as the popup) ──
+        #    Image creation uses ONLY this key; the 3.8-flash outline key is
+        #    never touched — two keys = two separate RPM budgets.
+        img_key_id = str(prov_meta.get("keyId") or provider_id)
+        img_key = _cli_vault_key(img_key_id)
+        if not img_key:
+            say(c(33, f"  Image creation needs an IMAGES-ONLY key (vault slot "
+                      f"'{img_key_id}') — it is never used for chat or outlines."))
+            raw_k = _cli_ask_text("Paste the image API key (Enter = skip)", "", input_fn=inp)
+            if raw_k is None:
+                return None
+            if raw_k:
+                try:
+                    credential_vault.set_key(img_key_id, raw_k)
+                    say(c(32, f"  ✓ image key saved into the vault as '{img_key_id}'."))
+                except Exception as e:
+                    say(c(31, f"  !! could not save the image key: {e}"))
         opts["images"] = img_opts
 
     # ── motion (like PowerPoint's ease: transition + entrance) ──
@@ -1834,7 +1861,22 @@ def _cli_describe_options(opts, kind, slides=0):
                      f"{img.get('provider')}"
                      + (f" → {img.get('model')}" if img.get("model") else "")
                      + ")")
+        img_key_id = _cli_image_key_id(img.get("provider"))
+        key_ok = bool(_cli_vault_key(img_key_id))
+        parts.append(f"image key: {c(32, '✓ set') if key_ok else c(31, '✗ MISSING')} "
+                     f"({img_key_id}, images-only)")
     say(f"  {c(37, 'You chose:')} " + " · ".join(parts))
+
+
+def _cli_image_key_id(provider_id):
+    """Vault slot for an image provider (manifest keyId) — the images-only key."""
+    try:
+        from services import registry as _reg
+        meta = next((p for p in _reg.image_providers()
+                     if p["id"] == provider_id), {})
+        return str(meta.get("keyId") or provider_id)
+    except Exception:
+        return str(provider_id)
 
 
 def _cli_docgen_pin(kind):

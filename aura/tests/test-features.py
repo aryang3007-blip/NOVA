@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import urllib.error
+from pathlib import Path
 
 # ── spend-ledger isolation: THIS suite writes its own temp DB ──────────
 # (budget/retry tests record usage — never pollute the real AURA DB).
@@ -104,9 +105,10 @@ ok("unknown kind is honest", "Unknown document kind" in outline.validate("exe", 
 
 # ════════════════════════════════════════════════════════════ IMAGES
 sec("IMAGE GENERATION — HONEST + WIRE-TESTED")
-av = images.availability(key_fn=lambda p: "k" if p == "gemini" else "")
-ok("availability reports the key truth per provider",
-   {a["id"]: a["hasKey"] for a in av} == {"gemini": True, "openai": False})
+av = images.availability(key_fn=lambda p: "k" if p == "gemini-image" else "")
+ok("availability reports the IMAGES-ONLY key truth per provider",
+   {a["id"]: a["hasKey"] for a in av} == {"gemini": True, "openai": False},
+   str({a["id"]: a["hasKey"] for a in av}))
 no_key = images.generate("cat", provider="openai", key_fn=lambda p: None)
 ok("no key → honest message, no fake file",
    not no_key["ok"] and "key" in no_key["message"].lower())
@@ -118,6 +120,54 @@ def fake_nano(_req):
             return (b'{"candidates":[{"content":{"parts":[{"inlineData":'
                     b'{"mimeType":"image/png","data":"' + b64.encode() + b'"}}]}}]}')
     return R()
+
+# ── STRICT KEY SEPARATION: images use ONLY the images-only slot ──
+_asked = []
+def _strict_key_fn(kid):
+    _asked.append(kid)
+    return "IMG-KEY" if kid == "gemini-image" else ""  # chat key 'gemini' empty
+r_strict = images.generate("x", provider="gemini", outdir=OUT,
+                           key_fn=_strict_key_fn, urlopen_fn=fake_nano,
+                           min_interval=0)
+ok("image call asks ONLY the images-only key (gemini-image)",
+   r_strict["ok"] and _asked == ["gemini-image"] and r_strict["keyId"] == "gemini-image",
+   str(_asked))
+ok("chat key present does NOT satisfy images (no fallback to the 3.8-flash key)",
+   not images.generate("x", provider="gemini", outdir=OUT,
+                       key_fn=lambda p: "chat-key" if p == "gemini" else "",
+                       urlopen_fn=fake_nano, min_interval=0)["ok"])
+r_strict2 = images.generate("x", provider="gemini", outdir=OUT,
+                            key_fn=lambda p: "" , urlopen_fn=fake_nano, min_interval=0)
+ok("missing images-only key names the EXACT add spot (PPT Builder → Images)",
+   not r_strict2["ok"] and "PPT Builder" in r_strict2["message"]
+   and "IMAGES-ONLY" in r_strict2["message"], r_strict2["message"][:80])
+
+# ── RPM PACING: never burst two image calls on one key ──
+images._THROTTLE.clear()  # fresh RPM clock for this section
+_slept = []
+def _sleep_rec(sec):
+    _slept.append(round(sec, 1))
+images.generate("a", provider="gemini", outdir=OUT,
+                key_fn=lambda p: "k", urlopen_fn=fake_nano,
+                min_interval=5, sleep_fn=_sleep_rec)
+ok("first image call fires immediately", _slept == [], str(_slept))
+images.generate("b", provider="gemini", outdir=OUT,
+                key_fn=lambda p: "k", urlopen_fn=fake_nano,
+                min_interval=5, sleep_fn=_sleep_rec)
+ok("second immediate call is paced (~5s) — the RPM burst is gone",
+   len(_slept) == 1 and _slept[0] >= 4.0, str(_slept))
+images.generate("c", provider="gemini", outdir=OUT,
+                key_fn=lambda p: "k", urlopen_fn=fake_nano,
+                min_interval=0, sleep_fn=_sleep_rec)
+ok("interval 0 = no pacing (user can disable)", len(_slept) == 1, str(_slept))
+
+# The strict/pacing tests above burned part of the default daily image budget
+# (5) — reset the ledger so the wire tests below start fresh.
+try:
+    from persistence.repositories import usage_repo as _ur_wire
+    _ur_wire.clear()
+except Exception:
+    pass
 
 r = images.generate("a rocket", style="flat illustration", provider="gemini",
                     outdir=OUT, key_fn=lambda p: "test-key", urlopen_fn=fake_nano)
@@ -426,37 +476,58 @@ ok("docgen pin reads THE manifest model (one source of truth)",
    f"{pin_prov} {pin_model}")
 ok("docx has no pin (chat backend runs it)", serve._cli_docgen_pin("docx") == (None, None))
 
-# design[1] slides[12] images yes[1] count[2] style[3=3d render]
-# provider[2=openai] transition[11=wheel] speed[2=slow] animation[1=bounce]
-answers = iter(["1", "12", "1", "2", "3", "2", "11", "3", "2"])
-wiz = serve._cli_doc_wizard("pptx", input_fn=lambda p: next(answers))
-ok("wizard returns options + slide count",
-   wiz is not None and wiz[1] == 12, str(wiz)[:80])
-opts_w = wiz[0]
-ok("design is the picked theme (1 = professional-dark)",
-   opts_w["theme"] == "professional-dark", opts_w["theme"])
-ok("image answers land (2 images, 3d render, openai)",
-   opts_w["images"]["enabled"] and opts_w["images"]["count"] == 2
-   and opts_w["images"]["style"] == "3d render"
-   and opts_w["images"]["provider"] == "openai", str(opts_w["images"]))
-ok("motion answers land (wheel / slow / bounce)",
-   opts_w["transition"] == "wheel" and opts_w["speed"] == "slow"
-   and opts_w["animation"] == "bounce", str(opts_w))
+# The wizard saves the images-only key into the VAULT — patch it to a temp
+# file so the test never touches the user's real vault.
+_old_vault = serve.credential_vault
+from persistence.vault import CredentialManager as _CM   # noqa: E402
+_tmp_vault = _CM(Path(tempfile.mkdtemp(prefix="aura-wizard-vault-")) / "vault.json")
+serve.credential_vault = _tmp_vault
+serve._CLI_VAT = None
+try:
+    # design[1] slides[12] images yes[1] count[2] style[3=3d render]
+    # provider[2=openai] image key PASTE[3 = skip, Enter] transition[11=wheel]
+    # speed[2=slow] animation[1=bounce]
+    answers = iter(["1", "12", "1", "2", "3", "2", "", "11", "3", "2"])
+    wiz = serve._cli_doc_wizard("pptx", input_fn=lambda p: next(answers))
+    ok("wizard returns options + slide count",
+       wiz is not None and wiz[1] == 12, str(wiz)[:80])
+    opts_w = wiz[0]
+    ok("design is the picked theme (1 = professional-dark)",
+       opts_w["theme"] == "professional-dark", opts_w["theme"])
+    ok("image answers land (2 images, 3d render, openai)",
+       opts_w["images"]["enabled"] and opts_w["images"]["count"] == 2
+       and opts_w["images"]["style"] == "3d render"
+       and opts_w["images"]["provider"] == "openai", str(opts_w["images"]))
+    ok("motion answers land (wheel / slow / bounce)",
+       opts_w["transition"] == "wheel" and opts_w["speed"] == "slow"
+       and opts_w["animation"] == "bounce", str(opts_w))
+    merged = serve._cli_merge_build_options(serve._cli_build_options("pptx", ""), opts_w)
+    ok("wizard answers win over flag defaults",
+       merged["theme"] == "professional-dark" and merged["transition"] == "wheel"
+       and merged["animation"] == "bounce"
+       and merged["images"]["enabled"] is True, str(merged))
 
-merged = serve._cli_merge_build_options(serve._cli_build_options("pptx", ""), opts_w)
-ok("wizard answers win over flag defaults",
-   merged["theme"] == "professional-dark" and merged["transition"] == "wheel"
-   and merged["animation"] == "bounce"
-   and merged["images"]["enabled"] is True, str(merged))
-
-# provider with >1 model asks the exact image model (popup parity)
-# design[1] slides[12] images yes[2? no: 1] count[2] style[3] provider[1=gemini]
-# model[2=gemini-3.1-flash-lite-image] transition[11=wheel] speed[3=slow] anim[2=bounce]
-answers2 = iter(["1", "12", "1", "2", "3", "1", "2", "11", "3", "2"])
-wiz2 = serve._cli_doc_wizard("pptx", input_fn=lambda p: next(answers2))
-ok("image-model question answers the exact model (1-based, like the popup)",
-   wiz2 is not None and wiz2[0]["images"].get("model") == "gemini-3.1-flash-lite-image",
-   str(wiz2[0]["images"]) if wiz2 else "cancelled")
+    # provider with >1 model asks the exact model, and the image-key question
+    # SAVES the pasted key into the images-only vault slot (never 'gemini').
+    # design[1] slides[12] yes[1] count[2] style[3] provider[1=gemini]
+    # model[2=flash-lite] key PASTE[AIza-img-only-key] transition[11]
+    # speed[3] anim[2]
+    answers2 = iter(["1", "12", "1", "2", "3", "1", "2", "AIza-img-only-key",
+                     "11", "3", "2"])
+    wiz2 = serve._cli_doc_wizard("pptx", input_fn=lambda p: next(answers2))
+    ok("image-model question answers the exact model (1-based, like the popup)",
+       wiz2 is not None and wiz2[0]["images"].get("model") == "gemini-3.1-flash-lite-image",
+       str(wiz2[0]["images"]) if wiz2 else "cancelled")
+    ok("wizard saves the images-only key into gemini-image (strict slot)",
+       _tmp_vault.get_key("gemini-image") == "AIza-img-only-key"
+       and _tmp_vault.get_key("gemini") is None)
+    serve._CLI_VAT = None
+    ok("_cli_image_key_id resolves the manifest slot",
+       serve._cli_image_key_id("gemini") == "gemini-image"
+       and serve._cli_image_key_id("openai") == "openai-image")
+finally:
+    serve.credential_vault = _old_vault
+    serve._CLI_VAT = None
 
 # pure pickers: Enter = default, 1-based pick, bad input honest
 def feed(*seq):

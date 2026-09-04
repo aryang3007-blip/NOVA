@@ -147,8 +147,11 @@ export async function mount({ root, meta, prefill, ctx, close }) {
   const provWrap = document.createElement('div');
   provWrap.className = 'fk-provs';
   const provCards = new Map();
+  const keyOf = (ip) => ip.keyId || ip.id;
+  const hasImageKey = (ip) =>
+    !!(config?.getKey?.(keyOf(ip)) || config?.data?.apiKeys?.[keyOf(ip)]);
   for (const ip of providers) {
-    const has = !!(config?.getKey?.(ip.id) || config?.data?.apiKeys?.[ip.id]);
+    const has = hasImageKey(ip);
     const pc = document.createElement('div');
     pc.className = `fk-prov${ip.id === chosenProv ? ' sel' : ''}${has ? '' : ' nokey'}`;
     const h = document.createElement('div');
@@ -176,6 +179,7 @@ export async function mount({ root, meta, prefill, ctx, close }) {
       provWrap.querySelectorAll('.fk-prov').forEach(x => x.classList.remove('sel'));
       pc.classList.add('sel');
       renderImageModels();
+      refreshKeyUI();
     });
     provCards.set(ip.id, pc);
     provWrap.append(pc);
@@ -225,14 +229,62 @@ export async function mount({ root, meta, prefill, ctx, close }) {
       const { usageGuard, usageSnapshot } = await import('../../js/ai/doc-agent.js');
       const [g, snap] = await Promise.all([usageGuard('image'), usageSnapshot()]);
       if (!snap?.budget) return;
+      const pace = Number(snap.budget.imageIntervalSec) || 0;
       quotaLine.textContent = g.allowed
-        ? `Spend: ${g.used} image(s) used today of ${g.cap || 'unlimited'} — the cap is checked before every call.`
+        ? `Spend: ${g.used} image(s) used today of ${g.cap || 'unlimited'}`
+          + (pace > 0 ? ` · ${pace}s between images (RPM guard)` : '')
+          + ' — images use their OWN key, never the chat key.'
         : `⚠ ${g.message}`;
       quotaLine.classList.toggle('warn', !g.allowed);
     } catch {}
   };
   refreshQuota();
   renderImageModels();
+
+  // ── IMAGES-ONLY KEY: strictly separate from the outline/chat key ──
+  //    (the 3.8-flash key keeps its own RPM budget; images burn their own)
+  let refreshKeyUI = () => {};
+  const imgKeyBox = document.createElement('div');
+  imgKeyBox.className = 'fk-imgkey';
+  const imgKeyInput = document.createElement('input');
+  imgKeyInput.type = 'password';
+  imgKeyInput.className = 'fk-input';
+  imgKeyInput.autocomplete = 'off';
+  imgKeyInput.placeholder = 'paste the IMAGE key…';
+  const imgKeySave = btn('SAVE', 'btn');
+  const imgKeyState = document.createElement('span');
+  imgKeyState.className = 'fk-tag warn';
+  imgKeyState.textContent = '⚠ no image key';
+  imgKeyBox.append(imgKeyInput, imgKeySave, imgKeyState);
+  refreshKeyUI = () => {
+    const ip = currentProvider();
+    const kId = keyOf(ip);
+    const has = hasImageKey(ip);
+    imgKeyState.textContent = has ? `✓ ${kId} key set` : `⚠ no ${kId} key`;
+    imgKeyState.className = `fk-tag ${has ? 'ok' : 'warn'}`;
+    imgKeyInput.placeholder = has ? `replace the ${kId} key…` : `paste the ${kId} key…`;
+  };
+  imgKeySave.addEventListener('click', () => {
+    const v = imgKeyInput.value.trim();
+    if (!v) { ctx.toast?.('info', 'Paste the image key first — no empty saves.'); return; }
+    config.setKey(keyOf(currentProvider()), v);
+    imgKeyInput.value = '';
+    refreshKeyUI();
+    provCards.forEach(pc => {
+      const tag = pc.querySelector('.fk-tag');
+      if (tag) {
+        tag.textContent = '✓ KEY FOUND';
+        tag.className = 'fk-tag ok';
+      }
+    });
+    ctx.toast?.('success', 'Image-only key saved — used ONLY for image creation.');
+  });
+  const imgKeyField = field({ label: 'Image-only API key — used ONLY for images',
+                              input: imgKeyBox });
+  imgKeyField.querySelector('.fk-hint')?.remove();
+  card.append(imgKeyField);
+  imgKeyField.style.display = imgBox.cb.checked ? '' : 'none';
+
   if (!imgBox.cb.checked) selfHide();
   imgBox.cb.addEventListener('change', () => selfHide());
   function selfHide() {
@@ -240,6 +292,7 @@ export async function mount({ root, meta, prefill, ctx, close }) {
     imgRow.style.display = on ? '' : 'none';
     imgModelField.style.display = on ? '' : 'none';
     provWrap.style.display = on ? '' : 'none';
+    imgKeyField.style.display = on ? '' : 'none';
   }
   card.append(provWrap);
 

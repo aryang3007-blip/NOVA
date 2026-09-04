@@ -19,11 +19,15 @@ Provider payloads (wire-verified in tests with an injected urlopen):
 
 import base64
 import os
+import threading
+import time
 import uuid
 
 from ..registry import image_providers
 
 _MAX_IMG = 8 * 1024 * 1024
+_THROTTLE_LOCK = threading.Lock()
+_THROTTLE = {}  # key_id -> last request timestamp (RPM pacing)
 
 STYLE_HINTS = {
     "flat illustration": "flat vector illustration, clean shapes, poster quality",
@@ -47,11 +51,18 @@ def _vault_key(pid):
         return None
 
 
+def _key_id(prov):
+    """The vault slot for a provider — the IMAGES-ONLY key, never the chat key.
+    Strict separation: images using the same key as chat would share one RPM
+    budget (the exact bug: outline + images created 'at once' tripped it)."""
+    return str(prov.get("keyId") or prov.get("id") or "").strip()
+
+
 def availability(key_fn=None):
-    """Which image provider has a key right now (terminal + app pickers)."""
+    """Which image provider has its IMAGES-ONLY key right now."""
     out = []
     for p in providers():
-        has = bool((key_fn or _vault_key)(p["id"]))
+        has = bool((key_fn or _vault_key)(_key_id(p)))
         out.append({**p, "hasKey": has})
     return out
 
@@ -99,6 +110,27 @@ def _clip_err(text, n=110):
     return s[:n] + ("…" if len(s) > n else "")
 
 
+def _pace(key_id, min_interval, sleep_fn=time.sleep):
+    """RPM guard: never fire two image requests at `key_id` closer than
+    min_interval seconds apart (0 = off). `sleep_fn` is the test seam."""
+    if min_interval <= 0:
+        return False, 0.0
+    with _THROTTLE_LOCK:
+        now = time.time()
+        last = _THROTTLE.get(key_id, 0.0)
+        wait = min_interval - (now - last)
+        if wait > 0:
+            sleep_fn(wait)
+            return True, wait
+    return False, 0.0
+
+
+def _mark(key_id):
+    """Record that a request was sent on this key's RPM budget."""
+    with _THROTTLE_LOCK:
+        _THROTTLE[key_id] = time.time()
+
+
 def _save(data, outdir, mime=""):
     """Save with the right extension per the payload mime/magic bytes."""
     os.makedirs(outdir, exist_ok=True)
@@ -116,11 +148,16 @@ def _save(data, outdir, mime=""):
 
 def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
              model=None, key_fn=None, urlopen_fn=None, base_override=None,
-             retries=1, retry_delay=1.5):
+             retries=1, retry_delay=1.5, min_interval=None, sleep_fn=time.sleep):
     """
     Generate ONE image with the provider's (default or explicitly chosen) model.
+    STRICT KEY SEPARATION: the request uses ONLY the provider's images-only
+    key (manifest keyId, e.g. gemini-image) — the chat/outline key is never
+    read, so outline + images don't share one RPM budget.
     Budget: the daily image cap is checked BEFORE any network call; on 429/503
-    the call retries `retries` times (quota spikes are transient). Every call
+    the call retries `retries` times (quota spikes are transient); between
+    image requests on the same key, min_interval (budget imageIntervalSec,
+    default 5s) is enforced so a burst cannot trip the RPM limit. Every call
     lands in the usage ledger.
     Returns {ok, path?, provider?, model?, message}.
     """
@@ -135,10 +172,13 @@ def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
                 f"unknown {prov['label']} image model '{use_model}'"}
     if not use_model:
         return {"ok": False, "message": f"no image model configured for {provider}"}
-    key = (key_fn or _vault_key)(provider)
+    key_id = _key_id(prov)
+    key = (key_fn or _vault_key)(key_id)
     if not key:
         return {"ok": False, "message":
-                f"no {prov['label']} key — add it in Settings → API Keys"}
+                f"no IMAGES-ONLY key for {prov['label']} — add it in the PPT "
+                f"Builder → Images section (or Settings → Keys & Spend). It is "
+                f"used ONLY for image creation; the chat key is never touched."}
 
     # ── spend guard: block BEFORE the wire so a quota hit costs nothing ──
     allowed, info = _budget_check("image")
@@ -146,12 +186,20 @@ def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
         used, cap = info.get("used", 0), info.get("cap", 0)
         msg = (f"daily image budget reached ({used}/{cap}) — the image was NOT "
                f"sent. Raise the limit in Settings → Keys & Spend, or try again tomorrow.")
-        _log_usage(provider, use_model, "image", "blocked", msg)
+        _log_usage(key_id, use_model, "image", "blocked", msg)
         return {"ok": False, "blocked": True, "message": msg,
-                "provider": provider, "model": use_model}
+                "provider": provider, "model": use_model, "keyId": key_id}
+
+    # ── RPM pacing: never burst requests on one key ──
+    if min_interval is None:
+        try:
+            from persistence.repositories import usage_repo
+            min_interval = float(usage_repo.get_budget().get("imageIntervalSec", 5) or 0)
+        except Exception:
+            min_interval = 5.0
+    paced, waited = _pace(key_id, float(min_interval), sleep_fn=sleep_fn)
 
     import json
-    import time
     import urllib.error
     import urllib.request
 
@@ -159,6 +207,7 @@ def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
     mime = ""
     last_err = ""
     attempts = 1 + max(0, int(retries))
+    _mark(key_id)  # this key's RPM budget is consumed now
     for attempt in range(attempts):
         try:
             if prov["kind"] == "gemini-image":
@@ -209,29 +258,30 @@ def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
             if e.code in (429, 503) and attempt < attempts - 1:
                 time.sleep(retry_delay * (attempt + 1))
                 continue
-            _log_usage(provider, use_model, "image", "error", last_err)
+            _log_usage(key_id, use_model, "image", "error", last_err)
             return {"ok": False, "message": last_err}
         except Exception as e:
             last_err = f"{prov['label']} failed: {_clip_err(e)}"
-            _log_usage(provider, use_model, "image", "error", last_err)
+            _log_usage(key_id, use_model, "image", "error", last_err)
             return {"ok": False, "message": last_err}
 
     if not b64:
-        _log_usage(provider, use_model, "image", "error", "no image data")
+        _log_usage(key_id, use_model, "image", "error", "no image data")
         return {"ok": False, "message": f"{prov['label']} returned no image data"}
     try:
         data = base64.b64decode(b64)
     except Exception as e:
-        _log_usage(provider, use_model, "image", "error", "bad base64")
+        _log_usage(key_id, use_model, "image", "error", "bad base64")
         return {"ok": False, "message": f"{prov['label']} returned bad base64: {e}"}
     if len(data) > _MAX_IMG:
-        _log_usage(provider, use_model, "image", "error", "too large")
+        _log_usage(key_id, use_model, "image", "error", "too large")
         return {"ok": False, "message": f"generated image too large ({len(data)} bytes)"}
     try:
         path = _save(data, outdir or os.path.expanduser("~/Documents/AURA/images"), mime)
     except Exception as e:
-        _log_usage(provider, use_model, "image", "error", f"save: {e}")
+        _log_usage(key_id, use_model, "image", "error", f"save: {e}")
         return {"ok": False, "message": f"could not save image: {e}"}
-    _log_usage(provider, use_model, "image", "ok", f"{len(data)} bytes")
+    _log_usage(key_id, use_model, "image", "ok", f"{len(data)} bytes")
     return {"ok": True, "path": path, "provider": provider, "model": use_model,
-            "mime": mime or "image/png", "bytes": len(data)}
+            "keyId": key_id, "paced": paced, "bytes": len(data),
+            "mime": mime or "image/png"}

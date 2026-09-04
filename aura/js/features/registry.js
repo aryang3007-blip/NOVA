@@ -20,7 +20,8 @@ export const FEATURE_MANIFEST = {
         slides: 10, theme: 'professional-dark', transition: 'fade',
         speed: 'med', animation: 'none', model: 'gemini-3.8-flash',
         images: { enabled: true, count: 1, style: 'flat illustration',
-                  provider: 'gemini', model: 'gemini-3.1-flash-image' },
+                  provider: 'gemini', model: 'gemini-3.1-flash-image',
+                  keyId: 'gemini-image' },
       },
     },
     docx: {
@@ -64,7 +65,8 @@ export const FEATURE_MANIFEST = {
                 'uncover', 'zoom', 'comb', 'wheel', 'plus', 'random'],
   animations: ['none', 'bounce', 'float', 'fade-in', 'zoom-in'],
   imageProviders: [
-    { id: 'gemini', label: 'Google Gemini · Nano Banana', kind: 'gemini-image',
+    { id: 'gemini', keyId: 'gemini-image',
+      label: 'Google Gemini · Nano Banana', kind: 'gemini-image',
       model: 'gemini-3.1-flash-image',
       models: [
         { id: 'gemini-3.1-flash-image', label: 'Nano Banana 2 · Flash Image',
@@ -74,12 +76,17 @@ export const FEATURE_MANIFEST = {
         { id: 'gemini-3-pro-image', label: 'Nano Banana Pro',
           note: 'Premium quality · complex visuals' },
       ],
-      note: 'Needs a Gemini API key (Settings → API Keys)' },
-    { id: 'openai', label: 'OpenAI · gpt-image-1', kind: 'openai-images',
+      note: 'Images use a SEPARATE images-only key — add it in the PPT Builder '
+          + '→ Images section, or Settings → Keys & Spend. It is never used '
+          + 'for chat or outlines.' },
+    { id: 'openai', keyId: 'openai-image', label: 'OpenAI · gpt-image-1',
+      kind: 'openai-images',
       model: 'gpt-image-1',
       models: [{ id: 'gpt-image-1', label: 'gpt-image-1',
                  note: 'OpenAI image model' }],
-      note: 'Needs an OpenAI API key with image credit' },
+      note: 'Images use a SEPARATE images-only key — add it in the PPT Builder '
+          + '→ Images section, or Settings → Keys & Spend. It is never used '
+          + 'for chat or outlines.' },
   ],
 };
 
