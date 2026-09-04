@@ -1057,6 +1057,45 @@
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
+<script>
+/* Boot-failure surface: if ANY module fails to parse or import (a half-saved
+   file in a local copy, a stale browser cache, a corrupt download), the boot
+   screen shows the EXACT cause instead of spinning forever. Plain script,
+   so it runs even when the module graph is dead. */
+(function () {
+  function show(msg, detail) {
+    var log = document.getElementById('boot-log');
+    var bar = document.getElementById('boot-fill');
+    if (!log) return;
+    if (bar) { bar.style.background = '#ff5470'; bar.style.width = '100%'; }
+    var li = document.createElement('li');
+    li.className = 'boot-err';
+    li.style.cssText = 'color:#ff5470;opacity:1;padding:3px 0;font-family:var(--mono);font-size:.7rem';
+    li.textContent = '\u26a0 ' + msg;
+    log.appendChild(li);
+    if (detail) {
+      var d = document.createElement('li');
+      d.className = 'boot-err-detail';
+      d.style.cssText = 'color:#ffb4c2;opacity:1;padding:1px 0 6px;font-family:var(--mono);font-size:.64rem;word-break:break-all;white-space:pre-wrap';
+      d.textContent = detail;
+      log.appendChild(d);
+    }
+  }
+  window.addEventListener('error', function (e) {
+    var where = (e.filename || '') +
+      (e.lineno ? (':' + e.lineno + ':' + (e.colno || 0)) : '');
+    show('A module failed to load \u2014 the app cannot start.',
+      (e.message || String(e.error || 'unknown')) +
+      (where ? '\n' + where : '') +
+      '\nTip: hard-refresh (Ctrl+Shift+R). If it persists, re-copy the aura/ folder or `git pull`.');
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    show('A background task failed.', String((r && r.message) || r || 'unknown'));
+  });
+})();
+</script>
+
 <script type="module" src="./js/main.js"></script>
 <noscript>
   <div style="padding:2rem;color:#7dd3fc;font-family:monospace">AURA requires JavaScript modules. Please enable JavaScript.</div>
