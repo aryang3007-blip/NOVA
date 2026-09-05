@@ -1646,7 +1646,7 @@ def _cli_build_options(kind, arg=""):
     m = _re.search(r"--style\s+(.+?)(?=\s+--|\s*$)", a, _re.I)
     if m:
         opts["images"]["style"] = m.group(1).strip().strip('"\'')
-    m = _re.search(r"--provider\s+(gemini|openai)", a, _re.I)
+    m = _re.search(r"--provider\s+(gemini|openai|openrouter)", a, _re.I)
     if m:
         opts["images"]["provider"] = m.group(1)
     return opts
@@ -1763,7 +1763,7 @@ def _cli_doc_wizard(kind, slides=0, input_fn=None):
         style_i = _cli_ask_choice("Image style?", styles, default_idx=0, input_fn=inp)
         if style_i is None:
             return None
-        provs = [p["id"] for p in (_reg.image_providers() if _reg else [])] or ["gemini", "openai"]
+        provs = [p["id"] for p in (_reg.image_providers() if _reg else [])] or ["gemini", "openai", "openrouter"]
         prov_i = _cli_ask_choice("Image provider?", provs, default_idx=0, input_fn=inp)
         if prov_i is None:
             return None

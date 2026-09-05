@@ -48,8 +48,14 @@ ok('gemini image provider ships the live Nano Banana model list',
    py.imageProviders?.[0]?.model === 'gemini-3.1-flash-image' &&
    JSON.stringify(py.imageProviders?.[0]?.models?.map(m => m.id)) ===
      JSON.stringify(['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image',
-                     'gemini-3-pro-image']),
+                     'gemini-3-pro-image', 'gemini-2.5-flash-image']),
    JSON.stringify(py.imageProviders?.[0]?.models));
+ok('OpenRouter carries the same Gemini image models with its own key slot',
+   py.imageProviders?.[2]?.id === 'openrouter' &&
+   py.imageProviders?.[2]?.keyId === 'openrouter-image' &&
+   py.imageProviders?.[2]?.kind === 'openrouter-images' &&
+   py.imageProviders?.[2]?.models?.[0]?.id === 'google/gemini-3.1-flash-image',
+   JSON.stringify(py.imageProviders?.[2]?.models?.[0]));
 ok('every default set identical (incl. preconfigured model)',
    Object.keys(FEATURE_MANIFEST.features).every(id =>
      JSON.stringify(py.defaults[id]) === JSON.stringify(defaultsFor(id))),

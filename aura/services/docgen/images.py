@@ -15,6 +15,11 @@ Provider payloads (wire-verified in tests with an injected urlopen):
                          Aug 2026 — the live Gemini image models are the
                          Nano Banana family, e.g. gemini-3.1-flash-image.)
   openai               → POST /v1/images/generations (b64_json)
+  openrouter           → POST https://openrouter.ai/api/v1/images (Bearer;
+                         data[].b64_json + media_type). The SAME Gemini Nano
+                         Banana models are served through one OpenRouter key
+                         ("one key, every provider" — the user's 436-model list
+                         includes google/gemini-3.1-flash-image & friends).
 """
 
 import base64
@@ -249,6 +254,19 @@ def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
                     "Authorization": f"Bearer {key}"})
                 resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
                 b64 = (resp.get("data") or [{}])[0].get("b64_json") or ""
+            elif prov["kind"] == "openrouter-images":
+                # OpenRouter's dedicated Image API serves the SAME Gemini Nano
+                # Banana models behind one key — model ids carry the provider
+                # prefix ('google/gemini-3.1-flash-image').
+                url = "https://openrouter.ai/api/v1/images"
+                body = json.dumps({"model": use_model, "prompt": full, "n": 1}).encode()
+                req = urllib.request.Request(url, data=body, headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}"})
+                resp = json.loads((urlopen_fn or urllib.request.urlopen)(req).read())
+                item = (resp.get("data") or [{}])[0]
+                b64 = item.get("b64_json") or ""
+                mime = item.get("media_type") or mime
             else:
                 return {"ok": False, "message": f"unsupported image provider kind '{prov['kind']}'"}
             break  # succeeded

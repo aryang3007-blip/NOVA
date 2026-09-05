@@ -68,7 +68,14 @@ ok("entrance animations exist (bounce default popup pick)",
 provs = registry.image_providers()
 ok("image providers declare kind+model",
    all(p.get("kind") and p.get("model") for p in provs))
-ok("both known providers listed", {p["id"] for p in provs} == {"gemini", "openai"})
+ok("all providers listed (direct + OpenRouter one-key route)",
+   {p["id"] for p in provs} == {"gemini", "openai", "openrouter"})
+ok("OpenRouter exposes the SAME Gemini image models behind one key",
+   any(p["id"] == "openrouter" and p["keyId"] == "openrouter-image"
+       and p["models"][0]["id"] == "google/gemini-3.1-flash-image" for p in provs))
+ok("older working image model from the user's list is selectable",
+   any(m["id"] == "gemini-2.5-flash-image" for m in
+       next(p["models"] for p in provs if p["id"] == "gemini")))
 ok("canon() resolves one caller shape", registry.canon("pptx")["id"] == "pptx")
 
 # ═══════════════════════════════════════════════════════ CLI OPTION PARSER
@@ -87,6 +94,10 @@ ok("animation parses", o["animation"] == "bounce")
 ok("images enabled with count", o["images"]["enabled"] and o["images"]["count"] == 2)
 ok("quoted style keeps the space", o["images"]["style"] == "3d render", o["images"]["style"])
 ok("provider parses", o["images"]["provider"] == "openai")
+or_prov = serve._cli_build_options(
+    "pptx", "--images 1 --provider openrouter")
+ok("OpenRouter is a valid --provider flag (the one-key route)",
+   or_prov["images"]["provider"] == "openrouter", str(or_prov["images"]))
 once = serve._cli_build_options("pptx", "--images")
 ok("--images without count → enabled, 1 image", once["images"]["enabled"]
    and once["images"]["count"] == 1)
@@ -107,7 +118,8 @@ ok("unknown kind is honest", "Unknown document kind" in outline.validate("exe", 
 sec("IMAGE GENERATION — HONEST + WIRE-TESTED")
 av = images.availability(key_fn=lambda p: "k" if p == "gemini-image" else "")
 ok("availability reports the IMAGES-ONLY key truth per provider",
-   {a["id"]: a["hasKey"] for a in av} == {"gemini": True, "openai": False},
+   {a["id"]: a["hasKey"] for a in av} == {"gemini": True, "openai": False,
+                                          "openrouter": False},
    str({a["id"]: a["hasKey"] for a in av}))
 no_key = images.generate("cat", provider="openai", key_fn=lambda p: None)
 ok("no key → honest message, no fake file",
@@ -160,6 +172,32 @@ images.generate("c", provider="gemini", outdir=OUT,
                 key_fn=lambda p: "k", urlopen_fn=fake_nano,
                 min_interval=0, sleep_fn=_sleep_rec)
 ok("interval 0 = no pacing (user can disable)", len(_slept) == 1, str(_slept))
+
+# ── OPENROUTER: one key serves the SAME Gemini image models ──
+def fake_or(_req):
+    b64 = base64.b64encode(b"\x89PNG\r\n\x1a\nORA").decode()
+    class R:
+        def read(self):
+            return (b'{"created":1,"data":[{"b64_json":"' + b64.encode()
+                    + b'","media_type":"image/png"}],"usage":{"cost":0.04}}')
+    return R()
+_or_asked = []
+def _or_key_fn(kid):
+    _or_asked.append(kid)
+    return "OR-KEY" if kid == "openrouter-image" else ""
+r_or = images.generate("x", provider="openrouter", outdir=OUT,
+                       key_fn=_or_key_fn, urlopen_fn=fake_or, min_interval=0)
+ok("OpenRouter image call reads ONLY its images-only key (openrouter-image)",
+   r_or["ok"] and _or_asked == ["openrouter-image"] and r_or["keyId"] == "openrouter-image",
+   str(_or_asked))
+ok("OpenRouter returns the Gemini image (b64_json + media_type saved)",
+   os.path.isfile(r_or.get("path", "")) and r_or["mime"] == "image/png",
+   str(r_or.get("message", ""))[:60])
+r_or2 = images.generate("x", provider="openrouter", outdir=OUT,
+                        key_fn=lambda p: None, min_interval=0)
+ok("OpenRouter without its own key → honest IMAGES-ONLY message",
+   not r_or2["ok"] and "PPT Builder" in r_or2["message"]
+   and "IMAGES-ONLY" in r_or2["message"])
 
 # The strict/pacing tests above burned part of the default daily image budget
 # (5) — reset the ledger so the wire tests below start fresh.

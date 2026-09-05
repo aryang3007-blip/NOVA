@@ -75,6 +75,8 @@ export const FEATURE_MANIFEST = {
           note: 'Fastest & cheapest' },
         { id: 'gemini-3-pro-image', label: 'Nano Banana Pro',
           note: 'Premium quality · complex visuals' },
+        { id: 'gemini-2.5-flash-image', label: 'Nano Banana (2.5 Flash Image)',
+          note: 'Older generation · still fast and reliable' },
       ],
       note: 'Images use a SEPARATE images-only key — add it in the PPT Builder '
           + '→ Images section, or Settings → Keys & Spend. It is never used '
@@ -87,6 +89,24 @@ export const FEATURE_MANIFEST = {
       note: 'Images use a SEPARATE images-only key — add it in the PPT Builder '
           + '→ Images section, or Settings → Keys & Spend. It is never used '
           + 'for chat or outlines.' },
+    { id: 'openrouter', keyId: 'openrouter-image',
+      label: 'OpenRouter · Nano Banana (Gemini)', kind: 'openrouter-images',
+      model: 'google/gemini-3.1-flash-image',
+      models: [
+        { id: 'google/gemini-3.1-flash-image',
+          label: 'Nano Banana 2 · Flash Image',
+          note: 'Same Gemini image model via OpenRouter · one key, one bill' },
+        { id: 'google/gemini-3.1-flash-lite-image',
+          label: 'Nano Banana 2 Lite', note: 'Fastest & cheapest' },
+        { id: 'google/gemini-3-pro-image',
+          label: 'Nano Banana Pro',
+          note: 'Premium quality · complex visuals' },
+        { id: 'google/gemini-2.5-flash-image',
+          label: 'Nano Banana (2.5)', note: 'Older generation · fast' },
+      ],
+      note: 'Images use a SEPARATE images-only key (openrouter-image) — add it '
+          + 'in the PPT Builder → Images section, or Settings → Keys & '
+          + 'Spend. It is never used for chat or outlines.' },
   ],
 };
 
