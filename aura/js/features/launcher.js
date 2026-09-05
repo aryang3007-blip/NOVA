@@ -80,6 +80,14 @@ const MODAL_CSS = `
 .fk-imgkey { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; }
 .fk-imgkey input { flex: 1; min-width: 140px; }
 .fk-imgkey .fk-tag { white-space: nowrap; }
+/* visual-source mode radio group (search-first resolution engine) */
+.fk-mode { display: grid; gap: .2rem; }
+.fk-mode-row { display: flex; align-items: center; gap: .45rem; font-size: .78rem;
+  color: var(--text, #e8eef5); cursor: pointer; }
+.fk-mode-row input { accent-color: var(--accent, #38bdf8); }
+.fk-srcpref { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.fk-srcpref select { max-width: 260px; }
+.fk-mode-note { font-size: .62rem; color: var(--dim, #7d8da3); }
 .fk-status { margin-top: .8rem; max-height: 150px; overflow-y: auto;
   font-family: var(--mono, monospace); font-size: .68rem; line-height: 1.7;
   background: rgba(0,0,0,.25); border-radius: 8px; padding: .5rem .6rem; }

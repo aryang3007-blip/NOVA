@@ -15,7 +15,9 @@ from typing import Any, Dict, List, Optional, Tuple
 SCHEMAS = {
     "pptx": ('{"title":"…","slides":[{"kind":"title|bullets|two-column|process|timeline|'
              'stats|comparison|quote|conclusion|references|image","title":"…","purpose":"…",'
-             '"bullets":["…"],"notes":"…","image":"path|@gen:style|https://…"}]}'),
+             '"bullets":["…"],"notes":"…","image":"path|@gen:style|https://…",'
+             '"visual":{"required":true,"type":"photo|reference|illustration|diagram|chart|icon|none",'
+             '"search_query":"…","ai_prompt":"…","source_preference":"auto"}}]}'),
     "xlsx": '{"title":"…","sheets":[{"name":"…","columns":["…"],"rows":[[1,"…"]]}]}',
     "docx": '{"title":"…","sections":[{"heading":"…","paragraphs":["…"],"bullets":["…"]}]}',
 }
@@ -24,7 +26,15 @@ RULES = {
     "pptx": ("8-12 content slides unless a count was requested. Slide 1 kind 'title'. "
              "Last slide 'conclusion' + 'references'. Every content slide: 3-5 real bullets "
              "(8-18 words) and speaker notes. No invented facts. If an image source or "
-             "@gen:style marker is supplied, use kind 'image' slides for it."),
+             "@gen:style marker is supplied, use kind 'image' slides for it. "
+             "For slides that truly need a visual, add the 'visual' object on kind 'image' "
+             "slides: type 'photo' or 'reference' for real-world/scientific imagery "
+             "(search_query = what to search, e.g. 'NASA solar system planets'), "
+             "type 'illustration' only for custom/fictional art (ai_prompt = exact art "
+             "prompt), type 'diagram' for process/flow visuals (put the steps in the "
+             "slide's 'steps'), type 'chart' for data bars ('stats' entries), type 'none' "
+             "when no visual helps. You describe WHAT is needed; the deck engine decides "
+             "HOW to obtain it — never force image generation for real photos."),
     "xlsx": ("One sheet, 3-6 columns, 8-20 rows; numbers are JSON numbers."),
     "docx": ("4-8 sections; each heading with 1-3 paragraphs of real content."),
 }

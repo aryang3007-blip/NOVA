@@ -27,6 +27,8 @@ from services import registry                                 # noqa: E402
 from services.docgen import animations, images, outline      # noqa: E402
 from services.docgen import service as doc_service           # noqa: E402
 from services.docgen import builder as doc_builder           # noqa: E402
+from services.docgen import visuals as visuals_mod           # noqa: E402
+from services.docgen import image_sources as image_sources_mod  # noqa: E402
 from server import serve                                     # noqa: E402
 
 P, F = [], []
@@ -236,6 +238,224 @@ class BadB64:
 r = images.generate("x", provider="gemini", outdir=OUT,
                     key_fn=lambda p: "k", urlopen_fn=lambda _req: BadB64())
 ok("bad base64 → honest message", not r["ok"] and "bad base64" in r["message"])
+
+# ═══════════════════════════ VISUAL RESOLUTION ENGINE ═══════════════════════
+sec("VISUAL RESOLUTION ENGINE — search → AI → native fallback")
+_PNG1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+_CAND = {"url": "https://example.com/static/solar.jpg",
+         "title": "Solar system planets orbit the Sun", "source": "nasa",
+         "license": "Public Domain", "attribution": "NASA (Public Domain)"}
+
+def _mk_search(results, record):
+    def fn(query, preference="auto", kind="photo", max_results=8):
+        record.append({"q": query, "pref": preference, "kind": kind})
+        return {"ok": bool(results), "results": results, "notes": []}
+    return fn
+
+def _mk_download(record):
+    def fn(url, outdir):
+        record.append(url)
+        os.makedirs(outdir, exist_ok=True)
+        p = os.path.join(outdir, "web-pick.png")
+        with open(p, "wb") as fh:
+            fh.write(_PNG1)
+        return p, None, {"bytes": len(_PNG1), "width": 1, "height": 1,
+                         "mime": "image/png"}
+    return fn
+
+def _mk_generate(out, record):
+    def fn(prompt, style="flat illustration", provider="gemini", outdir=None,
+           model=None, **kw):
+        record.append({"prompt": prompt, "model": model, "provider": provider})
+        if not out.get("ok"):
+            out.pop("recorded", None)
+            return dict(out)
+        os.makedirs(outdir, exist_ok=True)
+        p = os.path.join(outdir, "ai-pick.png")
+        with open(p, "wb") as fh:
+            fh.write(_PNG1)
+        return {"ok": True, "path": p, "provider": provider,
+                "model": model or "stub", "keyId": f"{provider}-image",
+                "bytes": len(_PNG1), "mime": "image/png"}
+    return fn
+
+_O_VIS = (visuals_mod.search_fn, visuals_mod.download_fn, visuals_mod.generate_fn)
+_search_log, _download_log, _generate_log = [], [], []
+
+def _vis_resolver(path, must_exist=False, **kw):
+    return path, None   # same jail shape bridge._resolve_path returns
+
+def _vis_spec(visual, kind="image"):
+    return {"title": "T", "slides": [
+        {"kind": kind, "title": "Visual", "purpose": "supports the slide",
+         "visual": visual}]}
+
+try:
+    # 1) "Our solar system" → scientific/reference → SEARCH first, NO AI call.
+    visuals_mod.search_fn = _mk_search([_CAND], _search_log)
+    visuals_mod.download_fn = _mk_download(_download_log)
+    visuals_mod.generate_fn = _mk_generate({"ok": True}, _generate_log)
+    s1, rep1 = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "reference",
+                   "search_query": "NASA solar system planets"}),
+        {"enabled": True, "count": 1, "mode": "smart",
+         "style": "flat illustration", "provider": "gemini",
+         "model": "gemini-3.1-flash-image"}, "Our solar system", OUT)
+    ok("scientific/reference visual → searched FIRST (AI never called)",
+       rep1["sources"]["web"] == 1 and not _generate_log
+       and s1["slides"][0]["image"].endswith(".png") and _search_log,
+       f"search={len(_search_log)} generate={len(_generate_log)}")
+    ok("web visual keeps attribution + URL for the credits",
+       s1["slides"][0]["_visualMeta"].get("attribution") == "NASA (Public Domain)"
+       and s1["slides"][0]["_visualMeta"].get("url") == _CAND["url"],
+       str(s1["slides"][0].get("_visualMeta")))
+
+    # 2) custom illustration → the UI-selected image model reaches generation.
+    _search_log.clear(); _generate_log.clear()
+    s2, rep2 = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "illustration",
+                   "ai_prompt": "futuristic Mars city concept art"}),
+        {"enabled": True, "count": 1, "mode": "smart", "style": "3d render",
+         "provider": "gemini", "model": "gemini-3-pro-image"}, "Mars", OUT)
+    ok("illustration → AI generation, NOT search (no wasted search call)",
+       rep2["sources"]["ai"] == 1 and not _search_log,
+       f"search={len(_search_log)} ai={rep2['sources']['ai']}")
+    ok("selected image model from the UI reaches the backend generate call",
+       _generate_log and _generate_log[0]["model"] == "gemini-3-pro-image"
+       and _generate_log[0]["provider"] == "gemini",
+       str(_generate_log[:1]))
+
+    # 3) search fails in Smart → AI fallback (still one generation path).
+    _search_log.clear(); _generate_log.clear()
+    visuals_mod.search_fn = _mk_search([], _search_log)
+    s3, rep3 = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "photo",
+                   "search_query": "ancient temple photo"}),
+        {"enabled": True, "count": 1, "mode": "smart", "style": "photorealistic",
+         "provider": "gemini", "model": "gemini-3.1-flash-image"}, "History", OUT)
+    ok("photo with no search hit → AI fallback (search did run first)",
+       rep3["sources"]["ai"] == 1 and _search_log and len(_generate_log) == 1,
+       str(rep3["sources"]))
+
+    # 4) HTTP 429 → ONE attempt → native visual; deck still completes.
+    _generate_log.clear()
+    _q = {"ok": False, "message":
+          "Google Gemini · Nano Banana HTTP 429: quota exceeded"}
+    visuals_mod.generate_fn = _mk_generate(_q, _generate_log)
+    s4, rep4 = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "illustration",
+                   "ai_prompt": "custom artwork"}),
+        {"enabled": True, "count": 1, "mode": "smart", "style": "flat illustration",
+         "provider": "gemini", "model": "gemini-3.1-flash-image"}, "Art", OUT)
+    ok("429 → native fallback, exactly ONE generate call (no retry loop)",
+       rep4["sources"]["native"] == 1 and len(_generate_log) == 1
+       and s4["slides"][0].get("_nativeVisual", {}).get("kind") == "icon",
+       f"calls={len(_generate_log)} src={rep4['sources']}")
+    ok("native report is honest about the 429 reason",
+       "429" in s4["slides"][0]["_visualMeta"].get("note", ""),
+       s4["slides"][0]["_visualMeta"].get("note", "")[:90])
+
+    # 5) diagram/chart → PPT-native, ZERO search + ZERO AI calls.
+    _search_log.clear(); _generate_log.clear()
+    s5, rep5 = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "diagram",
+                   "steps": ["Evaporation", "Condensation", "Precipitation"]}),
+        {"enabled": True, "count": 1, "mode": "smart"}, "Water cycle", OUT)
+    s6, rep6 = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "chart",
+                   "chart": [{"label": "A", "value": 4}, {"label": "B", "value": 9}]}),
+        {"enabled": True, "count": 1, "mode": "smart"}, "Stats", OUT)
+    ok("process diagram → native diagram, no API calls",
+       rep5["sources"]["native"] == 1 and not _search_log and not _generate_log
+       and s5["slides"][0]["_nativeVisual"]["kind"] == "diagram",
+       str(s5["slides"][0].get("_nativeVisual")))
+    ok("data chart → native bar chart, no API calls",
+       rep6["sources"]["native"] == 1 and not _search_log and not _generate_log
+       and s6["slides"][0]["_nativeVisual"]["kind"] == "chart",
+       str(s6["slides"][0].get("_nativeVisual")))
+
+    # 6) modes: web-only NEVER calls AI; ai-only NEVER searches; none = native.
+    _search_log.clear(); _generate_log.clear()
+    visuals_mod.search_fn = _mk_search([], _search_log)
+    visuals_mod.generate_fn = _mk_generate({"ok": True}, _generate_log)
+    sw, repw = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "photo", "search_query": "temple"}),
+        {"enabled": True, "count": 1, "mode": "web"}, "History", OUT)
+    ok("mode=web: search miss → native, AI NEVER called",
+       repw["sources"]["native"] == 1 and not _generate_log, str(repw["sources"]))
+    _search_log.clear(); _generate_log.clear()
+    sa, repa = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "photo", "search_query": "temple"}),
+        {"enabled": True, "count": 1, "mode": "ai"}, "History", OUT)
+    ok("mode=ai: generation called directly, search NEVER called",
+       repa["sources"]["ai"] == 1 and not _search_log, str(repa["sources"]))
+    _search_log.clear(); _generate_log.clear()
+    sn, repn = visuals_mod.resolve_deck(
+        _vis_spec({"required": True, "type": "photo", "search_query": "temple"}),
+        {"enabled": True, "count": 1, "mode": "none"}, "History", OUT)
+    ok("mode=none: native emblem only, zero network calls",
+       repn["sources"]["native"] == 1 and not _search_log and not _generate_log)
+
+    # 7) legacy @gen marker still means generate (back-compat regression guard).
+    _generate_log.clear()
+    lm = visuals_mod.resolve_slide(
+        {"kind": "image", "title": "V", "image": "@gen:3d render"},
+        {"enabled": True, "mode": "smart", "style": "3d render",
+         "provider": "gemini", "model": "gemini-3.1-flash-image"}, "", OUT)
+    ok("legacy @gen marker → AI generation (unchanged contract)",
+       lm["status"] == "ai" and len(_generate_log) == 1, lm["status"])
+
+    # 8) SSRF guard: a private/local host can never be downloaded.
+    p, err, meta = image_sources_mod.download("http://127.0.0.1/evil.png", OUT)
+    ok("local/private image host is refused (SSRF guard)",
+       p is None and "not allowed" in str(err), str(err))
+
+    # 9) SERVICE-LEVEL: web visual + 429 fallback both build a real deck.
+    visuals_mod.search_fn = _mk_search([_CAND], _search_log)
+    visuals_mod.download_fn = _mk_download(_download_log)
+    visuals_mod.generate_fn = _mk_generate({"ok": True}, _generate_log)
+    wspec = {"title": "Solar", "slides": [
+        {"kind": "title", "title": "Solar", "bullets": []},
+        {"kind": "image", "title": "Our Solar System",
+         "visual": {"required": True, "type": "reference",
+                    "search_query": "NASA solar system planets"}}]}
+    rw = doc_service.generate("pptx", wspec, folder=OUT, resolver=_vis_resolver,
+                              options={"images": {"enabled": True, "count": 1,
+                                                  "mode": "smart",
+                                                  "style": "flat illustration",
+                                                  "provider": "gemini",
+                                                  "model": "gemini-3.1-flash-image"}})
+    ok("SERVICE: searched visual really embeds in the pptx",
+       rw["ok"] and rw["images"]["sources"]["web"] == 1
+       and rw["embedded_images"] == 1, str(rw.get("images", {}).get("sources")))
+    from pptx import Presentation as _P
+    _P(rw["path"])
+    ok("service deck with a web visual re-opens in python-pptx", True)
+
+    _generate_log.clear()
+    visuals_mod.generate_fn = _mk_generate(_q, _generate_log)
+    fspec = {"title": "Mars", "slides": [
+        {"kind": "title", "title": "Mars", "bullets": []},
+        {"kind": "image", "title": "Mars colony",
+         "visual": {"required": True, "type": "illustration",
+                    "ai_prompt": "Mars colony concept art"}}]}
+    rf = doc_service.generate("pptx", fspec, folder=OUT, resolver=_vis_resolver,
+                              options={"images": {"enabled": True, "count": 1,
+                                                  "mode": "smart",
+                                                  "style": "flat illustration",
+                                                  "provider": "gemini",
+                                                  "model": "gemini-3.1-flash-image"}})
+    ok("SERVICE: forced 429 → deck COMPLETES with a native visual",
+       rf["ok"] and rf["images"]["sources"]["native"] == 1
+       and len(rf.get("native_visuals") or []) >= 1
+       and not rf["images"]["failed"],
+       f"native={rf['images']['sources']} failed={rf['images']['failed']}")
+    _P(rf["path"])
+    ok("429-fallback deck re-opens in python-pptx (no blank slide)", True)
+finally:
+    (visuals_mod.search_fn, visuals_mod.download_fn, visuals_mod.generate_fn) = _O_VIS
 
 # ── QUOTA / SPEND: the 429 day — budget blocks BEFORE the wire ──
 def _quota_state():
@@ -488,7 +708,7 @@ if doc_builder.capabilities()["pptx"]:
         {"kind": "title", "title": "Canon", "bullets": []},
         {"kind": "bullets", "title": "A", "bullets": ["one", "two"]},
     ]}
-    r = doc_service.generate("pptx", spec, folder=OUT, resolver=resolver,
+    r = doc_service.generate("pptx", spec, folder=OUT, resolver=_vis_resolver,
                              options={"theme": "holiday", "transition": "zoom",
                                       "speed": "slow", "animation": "float",
                                       "images": {"enabled": False}})
@@ -500,7 +720,7 @@ if doc_builder.capabilities()["pptx"]:
 else:
     r = doc_service.generate("pptx", {"title": "Canon", "slides": [
         {"kind": "bullets", "title": "A", "bullets": ["one"]}]},
-        folder=OUT, resolver=resolver,
+        folder=OUT, resolver=_vis_resolver,
         options={"theme": "holiday", "transition": "zoom", "animation": "float",
                  "images": {"enabled": False}})
     ok("batteryless env refuses honestly (python-pptx cause, never a fake deck)",
@@ -523,9 +743,10 @@ serve.credential_vault = _tmp_vault
 serve._CLI_VAT = None
 try:
     # design[1] slides[12] images yes[1] count[2] style[3=3d render]
-    # provider[2=openai] image key PASTE[3 = skip, Enter] transition[11=wheel]
+    # provider[2=openai] image key PASTE[3 = skip, Enter]
+    # visual source[1=smart] preference[1=auto] transition[11=wheel]
     # speed[2=slow] animation[1=bounce]
-    answers = iter(["1", "12", "1", "2", "3", "2", "", "11", "3", "2"])
+    answers = iter(["1", "12", "1", "2", "3", "2", "", "1", "1", "11", "3", "2"])
     wiz = serve._cli_doc_wizard("pptx", input_fn=lambda p: next(answers))
     ok("wizard returns options + slide count",
        wiz is not None and wiz[1] == 12, str(wiz)[:80])
@@ -551,10 +772,14 @@ try:
     # model[2=flash-lite] key PASTE[AIza-img-only-key] transition[11]
     # speed[3] anim[2]
     answers2 = iter(["1", "12", "1", "2", "3", "1", "2", "AIza-img-only-key",
-                     "11", "3", "2"])
+                     "2", "5", "11", "3", "2"])
     wiz2 = serve._cli_doc_wizard("pptx", input_fn=lambda p: next(answers2))
     ok("image-model question answers the exact model (1-based, like the popup)",
        wiz2 is not None and wiz2[0]["images"].get("model") == "gemini-3.1-flash-lite-image",
+       str(wiz2[0]["images"]) if wiz2 else "cancelled")
+    ok("visual-source questions land (web-only + general search preference)",
+       wiz2 is not None and wiz2[0]["images"].get("mode") == "web"
+       and wiz2[0]["images"].get("sourcePreference") == "general",
        str(wiz2[0]["images"]) if wiz2 else "cancelled")
     ok("wizard saves the images-only key into gemini-image (strict slot)",
        _tmp_vault.get_key("gemini-image") == "AIza-img-only-key"

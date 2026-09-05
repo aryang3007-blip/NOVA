@@ -25,6 +25,7 @@ from . import animations as animations_mod
 from . import builder as builder_mod
 from . import images as images_mod
 from . import outline as outline_mod
+from . import visuals as visuals_mod
 
 
 def capabilities(key_fn=None):
@@ -78,16 +79,21 @@ def generate(kind, spec, folder=None, resolver=None, options=None):
     if not spec.get("theme"):
         spec = {**spec, "theme": manifest_defaults("pptx").get("theme", "professional-dark")}
 
-    # 3) AI images: @gen markers + auto-visuals → real files in the deck dir.
-    image_report = {"embedded": [], "failed": [], "count": 0}
+    # 3) VISUAL RESOLUTION ENGINE (search → AI → native fallback):
+    #    web/reference imagery is searched FIRST; AI image generation is a
+    #    fallback (and never the default for photo/reference visuals);
+    #    charts/diagrams are drawn natively; a 429 → native visual, and the
+    #    deck ALWAYS completes. The images-only key architecture + budget
+    #    guard live inside images.generate and are untouched.
+    image_report = {"embedded": [], "failed": [], "native": [], "count": 0,
+                    "sources": {"web": 0, "ai": 0, "native": 0, "none": 0},
+                    "details": []}
     img_opts = opts.get("images") or {}
     if img_opts.get("enabled"):
         base = folder or builder_mod.default_folder()
         outdir = os.path.join(os.path.expanduser(base), "images")
-        spec, embedded, failed = outline_mod.expand_image_markers(
+        spec, image_report = visuals_mod.resolve_deck(
             spec, img_opts, str(spec.get("title") or ""), outdir)
-        image_report = {"embedded": embedded, "failed": failed,
-                        "count": len(embedded)}
 
     # 4) render (same builder the app always used).
     res = builder_mod.build(kind, spec, folder=folder, resolver=resolver)
@@ -96,8 +102,11 @@ def generate(kind, spec, folder=None, resolver=None, options=None):
             res["failed_images"] = image_report["failed"]
         return res
 
-    # 4b) honest image report: the BUILDER's embedding count is the truth —
-    #     a generated file that failed to render is reported, never claimed.
+    # 4b) honest visual report: the BUILDER's embedding count is the truth —
+    #     a resolved/generated file that failed to render is reported, never
+    #     claimed. Native visuals are counted separately (they are real deck
+    #     visuals but not "embedded images").
+    builder_native = res.get("native_visuals") or []
     if image_report.get("count"):
         built = res.get("embedded_images")
         if isinstance(built, int) and built != image_report["count"]:
@@ -105,6 +114,8 @@ def generate(kind, spec, folder=None, resolver=None, options=None):
             for f in (res.get("failed_images") or []):
                 if f not in image_report["failed"]:
                     image_report["failed"].append(f)
+    if builder_native and len(builder_native) >= len(image_report.get("native") or []):
+        image_report["native"] = builder_native  # builder is the truth
 
     # 5) motion on the finished file — pptx only, never on xlsx/docx.
     motion = None
@@ -121,10 +132,15 @@ def generate(kind, spec, folder=None, resolver=None, options=None):
     res["images"] = image_report
     res["motion"] = motion
     extras = []
-    if image_report["count"]:
-        extras.append(f"{image_report['count']} AI image(s) embedded")
+    src = image_report.get("sources") or {}
+    if src.get("web"):
+        extras.append(f"{src['web']} visual(s) found by image search")
+    if src.get("ai"):
+        extras.append(f"{src['ai']} AI image(s) generated")
+    if image_report.get("native"):
+        extras.append(f"{len(image_report['native'])} native visual(s)")
     if image_report["failed"]:
-        extras.append(f"images skipped: {'; '.join(image_report['failed'][:2])}")
+        extras.append(f"visuals skipped: {'; '.join(image_report['failed'][:2])}")
     if motion and motion.get("transitions", {}).get("applied"):
         t = motion["transitions"]
         extras.append(f"{t['applied']} slide transitions ({t['style']})")

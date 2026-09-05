@@ -89,11 +89,13 @@ export const DOC_KINDS = {
     schema:
       '{"title":"…","subtitle":"…","theme":"professional-dark|professional-light|academic|minimal",'
       + '"audience":"…","slides":[{"kind":"title|section|bullets|two-column|process|timeline|stats|'
-      + 'comparison|quote|conclusion|references","title":"…","purpose":"…",'
+      + 'comparison|quote|conclusion|references|image","title":"…","purpose":"…",'
       + '"bullets":["…"],"columns":{"left":{"title":"…","bullets":["…"]},"right":{"title":"…","bullets":["…"]}},'
       + '"steps":["…"],"timeline":[{"label":"…","text":"…"}],"stats":[{"value":"…","label":"…"}],'
       + '"table":{"columns":["…"],"rows":[["…"]]},"quote":"…","attribution":"…",'
-      + '"visual":"what imagery/diagram would support this slide","notes":"speaker notes"}]}',
+      + '"image":"path|@gen:style|https://…","notes":"speaker notes",'
+      + '"visual":{"required":true,"type":"photo|reference|illustration|diagram|chart|icon|none",'
+      + '"search_query":"…","ai_prompt":"…","source_preference":"auto"}}]}',
     rules:
       'Tell a coherent STORY, not a list of headings. Default 8–12 content slides unless a count '
       + 'was requested — honor a requested count within ±1. Slide 1 is kind "title" (include a '
@@ -105,7 +107,14 @@ export const DOC_KINDS = {
       + 'no restating the title, no empty sections. Every slide gets speaker "notes" (2–4 '
       + 'sentences the presenter would SAY, adding context beyond the bullets). Vary the kinds: '
       + 'at least 3 different content layouts across the deck. No invented statistics, dates or '
-      + 'quotes — prefer true general statements over false precision.',
+      + 'quotes — prefer true general statements over false precision. '
+      + 'Visuals: for slides that truly need one, use kind "image" and add the "visual" object. '
+      + 'type "photo" or "reference" for real-world/scientific imagery (fill search_query, e.g. '
+      + '"NASA solar system planets"), type "illustration" ONLY for custom/fictional art (fill '
+      + 'ai_prompt with the exact art prompt), type "diagram" for process/flow visuals (put '
+      + 'steps in "steps"), type "chart" for data bars (use "stats"), type "none" when no visual '
+      + 'helps. You describe WHAT is needed — the engine decides HOW to obtain it; never force '
+      + 'image generation for real photos.',
   },
   xlsx: {
     label: 'Spreadsheet', ext: '.xlsx', icon: '📈',

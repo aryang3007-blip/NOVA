@@ -449,6 +449,70 @@ def _image_px(path):
     return None, None
 
 
+def _render_native_visual(sl, raw, t):
+    """PPT-native visual (Visual Resolution Engine fallback): draw a flow
+    diagram, a bar chart or an icon emblem with real shapes — zero external
+    calls, so a 429 or a failed search can never leave a blank slide."""
+    from pptx.enum.text import PP_ALIGN
+    from pptx.enum.shapes import MSO_SHAPE
+    nv = raw.get("_nativeVisual") or {}
+    kind = str(nv.get("kind") or "icon").lower()
+    if kind == "diagram":
+        steps = [str(s) for s in (nv.get("steps") or []) if str(s).strip()][:6]
+        n = max(1, len(steps) or 1)
+        gap, w = 0.42, min(2.05, (12.2 - 0.42 * (n - 1)) / n)
+        x = 0.6
+        for i, s in enumerate(steps):
+            _add_text(sl, x, 1.95, w, 0.4, f"STEP {i + 1}", size=11,
+                      color=t["accent"], bold=True, align=PP_ALIGN.CENTER)
+            _add_rect(sl, x, 2.4, w, 2.4, t["panel"])
+            _add_rect(sl, x, 2.4, w, 0.07, t["accent"])
+            _add_text(sl, x + 0.14, 2.62, w - 0.28, 2.0, _clip(s, 220), size=12.5,
+                      color=t["ink"], align=PP_ALIGN.CENTER, spacing=1.05)
+            if i < n - 1:
+                sh = sl.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW,
+                                         Inches(x + w + 0.05), Inches(3.45),
+                                         Inches(0.32), Inches(0.3))
+                sh.fill.solid(); sh.fill.fore_color.rgb = _rgb(t["accent"])
+                sh.line.fill.background(); sh.shadow.inherit = False
+            x += w + gap
+        return True
+    if kind == "chart":
+        data = [d for d in (nv.get("data") or []) if isinstance(d, dict)][:6]
+        vals = [float(d.get("value") or 0) for d in data]
+        if not data or not any(vals):
+            return False
+        mx = max(vals) or 1
+        n = len(data)
+        gap, w = 0.35, min(1.7, (12.2 - 0.35 * (n - 1)) / n)
+        x = 0.75
+        for d, v in zip(data, vals):
+            h = max(0.25, 2.9 * (v / mx))
+            _add_text(sl, x, 3.75 - h - 0.45, w, 0.4,
+                      _clip(str(d.get("value") or ""), 16), size=13,
+                      color=t["accent"], bold=True, align=PP_ALIGN.CENTER)
+            _add_rect(sl, x + 0.1, 3.75 - h, w - 0.2, h, t["accent"])
+            _add_text(sl, x, 6.05, w, 0.6, _clip(str(d.get("label") or ""), 60),
+                      size=11, color=t["dim"], align=PP_ALIGN.CENTER, spacing=1.0)
+            x += w + gap
+        return True
+    # icon emblem
+    label = _clip(str(nv.get("label") or "Visual"), 80)
+    sh = sl.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                             Inches(5.55), Inches(2.0), Inches(2.2), Inches(2.2))
+    sh.fill.solid(); sh.fill.fore_color.rgb = _rgb(t["accent"])
+    sh.line.fill.background(); sh.shadow.inherit = False
+    initials = "".join(w[0] for w in label.split()[:2]).upper() or "A"
+    _add_text(sl, 5.55, 2.55, 2.2, 1.1, initials, size=44, color=t["bg"],
+              bold=True, font=FONT_HEAD, align=PP_ALIGN.CENTER)
+    _add_text(sl, 1.4, 4.5, 10.5, 0.7, label, size=20, color=t["ink"],
+              bold=True, align=PP_ALIGN.CENTER)
+    _add_text(sl, 1.4, 5.35, 10.5, 0.9,
+              _clip(str(nv.get("reason") or "Native visual"), 160), size=12.5,
+              color=t["dim"], align=PP_ALIGN.CENTER, spacing=1.1)
+    return True
+
+
 def _render_image(prs, raw, idx, total, deck, t):
     """'image' slides: full-bleed-ish picture + caption. No image → honest
     placeholder text instead of silently dropping the slide. Returns True
@@ -458,6 +522,11 @@ def _render_image(prs, raw, idx, total, deck, t):
     sl = prs.slides.add_slide(prs.slide_layouts[6])
     _slide_bg(sl, t["bg"])
     _header(sl, raw.get("title") or f"Slide {idx}", t, idx, total, deck)
+    # Native visual fallback (diagram / chart / icon) — drawn with shapes, no
+    # network involved, so a 429 or failed search never leaves a blank slide.
+    if raw.get("_nativeVisual"):
+        _notes(sl, raw)
+        return _render_native_visual(sl, raw, t)
     path = raw.get("_imagePath")
     note = raw.get("_imageNote") or "no image source supplied"
     if not path or not os.path.exists(path):
@@ -790,7 +859,7 @@ def build_pptx(spec, folder=None, resolver=None):
 
     total = made + len(content)
     rendered = 0
-    embedded, failed = [], []
+    embedded, failed, native_visuals = [], [], []
     for offset, raw in enumerate(content):
         idx = made + offset + 1
         kind = str(raw.get("kind") or "").lower().strip()
@@ -820,6 +889,8 @@ def build_pptx(spec, folder=None, resolver=None):
             embedded.append(f"slide {idx}")
         elif raw.get("image") and not (img_ok and added):
             failed.append(f"slide {idx}: {img_note if not img_ok else 'image could not be rendered'}")
+        if render_raw.get("_nativeVisual") and added:
+            native_visuals.append(f"slide {idx}")
         rendered += 1
 
     try:
@@ -835,10 +906,13 @@ def build_pptx(spec, folder=None, resolver=None):
         validation["issues"] = issues
     validation["embedded_images"] = embedded
     validation["failed_images"] = failed
+    validation["native_visuals"] = native_visuals
     total_slides = made + rendered
     msg = f"Created a {total_slides}-slide presentation ({theme_name}) at {path}"
     if embedded:
         msg += f" — {len(embedded)} image(s) embedded."
+    if native_visuals:
+        msg += f" — {len(native_visuals)} native visual(s) drawn."
     if validation["ok"]:
         msg += " — validated: every slide has content."
     else:
@@ -848,6 +922,7 @@ def build_pptx(spec, folder=None, resolver=None):
             "slides": total_slides, "bytes": os.path.getsize(path),
             "theme": theme_name, "validation": validation,
             "embedded_images": len(embedded), "failed_images": failed,
+            "native_visuals": native_visuals,
             "message": msg}
 
 

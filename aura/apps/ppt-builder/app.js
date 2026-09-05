@@ -134,9 +134,43 @@ export async function mount({ root, meta, prefill, ctx, close }) {
         : ' Add the <b>Gemini API key</b> in Settings → API Keys to enable outlines.'}</div>`;
   card.append(field({ label: 'Outline model (no guessing)', input: modelBox }));
 
-  // ── AI images: pick provider AND the exact image model ──
-  const imgBox = checkbox('Generate AI images and embed them on visual slides',
+  // ── Images & Visuals: SEARCH FIRST, generate when needed ──
+  const imgBox = checkbox('Automatically find or generate visuals for your slides',
                           d.images?.enabled !== false);
+  const imgMode = d.images?.mode || 'smart';
+  const MODE_PICKS = [
+    ['smart', 'Smart — search first, generate when needed'],
+    ['web', 'Web / image library only'],
+    ['ai', 'AI generation only'],
+    ['none', 'No external images'],
+  ];
+  const modeWrap = document.createElement('div');
+  modeWrap.className = 'fk-mode';
+  for (const [val, lab] of MODE_PICKS) {
+    const id = `vmode-${val}`;
+    const row = document.createElement('label');
+    row.className = 'fk-mode-row';
+    const r = document.createElement('input');
+    r.type = 'radio'; r.name = 'vmode'; r.value = val; r.id = id;
+    if (val === imgMode) r.checked = true;
+    const sp = document.createElement('span');
+    sp.textContent = lab;
+    row.append(r, sp);
+    modeWrap.append(row);
+  }
+  const srcPrefWrap = document.createElement('div');
+  srcPrefWrap.className = 'fk-srcpref';
+  const srcPref = select(
+    [{ value: 'auto', label: 'Source preference: Auto (authoritative first)' },
+     { value: 'nasa', label: 'NASA first (authoritative)' },
+     { value: 'wikimedia', label: 'Wikimedia Commons first' },
+     { value: 'openverse', label: 'Openverse (CC) first' },
+     { value: 'general', label: 'General web search first' }],
+    d.images?.sourcePreference || 'auto');
+  const srcHint = document.createElement('span');
+  srcHint.className = 'fk-mode-note';
+  srcHint.textContent = 'Photo/reference visuals are searched first; AI generation is only a fallback.';
+  srcPrefWrap.append(srcPref, srcHint);
   const imgCount = select([1, 2, 3].map(n => ({ value: n, label: `${n} image${n > 1 ? 's' : ''}` })),
                           d.images?.count || 1);
   const imgStyle = select(IMAGE_STYLES.map(s => ({ value: s, label: s })),
@@ -211,11 +245,14 @@ export async function mount({ root, meta, prefill, ctx, close }) {
     imgModelNote.textContent = currentProvider().models
       ?.find(m => m.id === imgModel.value)?.note || '';
   });
-  card.append(field({ label: 'Images', input: imgBox.wrap }));
+  card.append(field({ label: 'Images & Visuals — visual source', input: imgBox.wrap }));
+  card.append(field({ label: 'Visual source', input: modeWrap }));
+  const srcPrefField = field({ label: 'Image search', input: srcPrefWrap });
+  card.append(srcPrefField);
   const imgRow = document.createElement('div');
   imgRow.className = 'fk-img-row';
-  imgRow.append(field({ label: 'Count', input: imgCount }),
-                field({ label: 'Style', input: imgStyle }));
+  imgRow.append(field({ label: 'Visuals to find/generate', input: imgCount }),
+                field({ label: 'Style (AI fallback)', input: imgStyle }));
   card.append(imgRow);
   const imgModelField = field({ label: 'Image model', input: imgModel });
   imgModelField.append(imgModelNote);
@@ -285,14 +322,21 @@ export async function mount({ root, meta, prefill, ctx, close }) {
   card.append(imgKeyField);
   imgKeyField.style.display = imgBox.cb.checked ? '' : 'none';
 
+  const modeNow = () => modeWrap.querySelector('input:checked')?.value || 'smart';
   if (!imgBox.cb.checked) selfHide();
   imgBox.cb.addEventListener('change', () => selfHide());
+  modeWrap.addEventListener('change', () => selfHide());
   function selfHide() {
     const on = imgBox.cb.checked;
+    const m = modeNow();
     imgRow.style.display = on ? '' : 'none';
-    imgModelField.style.display = on ? '' : 'none';
-    provWrap.style.display = on ? '' : 'none';
-    imgKeyField.style.display = on ? '' : 'none';
+    imgModelField.style.display = on && m === 'ai' ? '' : 'none';
+    provWrap.style.display = on && m === 'ai' ? '' : 'none';
+    imgKeyField.style.display = on && m === 'ai' ? '' : 'none';
+    srcPrefField.style.display = on && (m === 'smart' || m === 'web') ? '' : 'none';
+    srcHint.textContent = m === 'web'
+      ? 'Only web/image-library search is used — AI generation is never called.'
+      : 'Photo/reference visuals are searched first; AI generation is only a fallback.';
   }
   card.append(provWrap);
 
@@ -372,23 +416,46 @@ export async function mount({ root, meta, prefill, ctx, close }) {
       const imgCountN = Number(imgCount.value) || 1;
       const imgModelId = imgModel.value || currentProvider().model;
       const provLabel = currentProvider().label || chosenProv;
+      const vMode = modeNow();
       if (imgOn) {
-        statusLine(box, `▸ Preparing ${imgCountN} AI image slide(s) (${imgStyle.value}, ${provLabel} → ${imgModelId})…`);
-        const marker = `@gen:${imgStyle.value}`;
+        statusLine(box, `▸ Resolving ${imgCountN} visual(s) — search first, generate when needed…`);
         const fillable = spec.slides.filter(s =>
           String(s.kind || '').toLowerCase() === 'image' && !s.image);
         let placed = 0;
-        for (const s of fillable) {
-          if (placed >= imgCountN) break;
-          s.image = marker;
-          placed++;
+        if (vMode === 'ai') {
+          // explicit generation: the ONLY mode that writes @gen markers
+          const marker = `@gen:${imgStyle.value}`;
+          for (const s of fillable) {
+            if (placed >= imgCountN) break;
+            s.image = marker;
+            placed++;
+          }
+          for (let i = placed; i < imgCountN; i++) {
+            const title = ['Visual highlight', 'Visual', 'Key visual'][i - placed] || 'Visual';
+            spec.slides.splice(Math.min(1 + i, spec.slides.length), 0,
+              { kind: 'image', title, purpose: 'AI-generated visual',
+                image: marker, notes: '' });
+          }
+        } else if (vMode !== 'none') {
+          // smart/web: describe WHAT is needed; the engine decides HOW.
+          // The outline usually supplies the structured `visual` — only add
+          // the required flag when the outline left an image slide bare.
+          for (const s of fillable) {
+            if (placed >= imgCountN) break;
+            s.visual = { required: true, type: 'photo',
+                         search_query: s.purpose || `${topicText} ${s.title || ''}` };
+            placed++;
+          }
+          for (let i = placed; i < imgCountN; i++) {
+            const title = ['Visual highlight', 'Visual', 'Key visual'][i - placed] || 'Visual';
+            spec.slides.splice(Math.min(1 + i, spec.slides.length), 0,
+              { kind: 'image', title, purpose: `visual for ${topicText}`,
+                visual: { required: true, type: 'photo',
+                          search_query: `${topicText} ${title}` },
+                notes: '' });
+          }
         }
-        for (let i = placed; i < imgCountN; i++) {
-          const title = ['Visual highlight', 'Visual', 'Key visual'][i - placed] || 'Visual';
-          spec.slides.splice(Math.min(1 + i, spec.slides.length), 0,
-            { kind: 'image', title, purpose: 'AI-generated visual',
-              image: marker, notes: '' });
-        }
+        // mode 'none': no external visuals are added at all.
       }
 
       const options = {
@@ -398,7 +465,8 @@ export async function mount({ root, meta, prefill, ctx, close }) {
         animation: animation.value,
         images: imgOn
           ? { enabled: true, count: imgCountN, style: imgStyle.value,
-              provider: chosenProv, model: imgModelId }
+              provider: chosenProv, model: imgModelId,
+              mode: vMode, sourcePreference: srcPref.value }
           : { enabled: false },
       };
       statusLine(box, `▸ Rendering ${spec.slides.length} slides (design: ${chosenTheme})…`);
@@ -407,8 +475,12 @@ export async function mount({ root, meta, prefill, ctx, close }) {
       statusLine(box, `✓ ${r.message}`, 'ok');
       statusLine(box, `  ${r.path}  ·  ${(r.bytes / 1024).toFixed(1)} KB`, 'ok');
       const im = r.images || {};
-      if (im.count) statusLine(box, `  • ${im.count} AI image(s) embedded (${imgModelId})`, 'ok');
-      if (im.failed?.length) statusLine(box, `  • image skip: ${im.failed[0]}`, 'err');
+      const vsrc = im.sources || {};
+      if (vsrc.web) statusLine(box, `  • ${vsrc.web} visual(s) found by image search`, 'ok');
+      if (vsrc.ai) statusLine(box, `  • ${vsrc.ai} AI image(s) generated (${imgModelId})`, 'ok');
+      if (im.native?.length) statusLine(box, `  • ${im.native.length} native visual(s) drawn (no API call)`, 'ok');
+      if (im.count) statusLine(box, `  • ${im.count} visual(s) embedded`, 'ok');
+      if (im.failed?.length) statusLine(box, `  • visual skip: ${im.failed[0]}`, 'err');
       const mo = r.motion || {};
       if (mo.transitions?.applied) statusLine(box, `  • ${mo.transitions.applied} slide transitions (${mo.transitions.style})`, 'ok');
       if (mo.animation?.applied) statusLine(box, `  • entrance animation: ${mo.animation.effect}`, 'ok');

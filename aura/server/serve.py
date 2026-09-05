@@ -1649,6 +1649,12 @@ def _cli_build_options(kind, arg=""):
     m = _re.search(r"--provider\s+(gemini|openai|openrouter)", a, _re.I)
     if m:
         opts["images"]["provider"] = m.group(1)
+    m = _re.search(r"--visual-source\s+(smart|web|ai|none)", a, _re.I)
+    if m:
+        opts["images"]["mode"] = m.group(1).lower()
+    m = _re.search(r"--source\s+(auto|nasa|wikimedia|openverse|general)\b", a, _re.I)
+    if m:
+        opts["images"]["sourcePreference"] = m.group(1).lower()
     return opts
 
 
@@ -1803,6 +1809,28 @@ def _cli_doc_wizard(kind, slides=0, input_fn=None):
                     say(c(32, f"  ✓ image key saved into the vault as '{img_key_id}'."))
                 except Exception as e:
                     say(c(31, f"  !! could not save the image key: {e}"))
+        # ── VISUAL SOURCE (search-first resolution engine) ──
+        vmode = _cli_ask_choice("Visual source?",
+                                ["Smart — search first, generate when needed",
+                                 "Web / image library only",
+                                 "AI generation only",
+                                 "No external images"],
+                                default_idx=0, input_fn=inp)
+        if vmode is None:
+            return None
+        img_opts["mode"] = ("smart", "web", "ai", "none")[vmode]
+        if img_opts["mode"] in ("smart", "web"):
+            pref = _cli_ask_choice("Image search preference?",
+                                   ["Auto — authoritative first",
+                                    "NASA first (authoritative)",
+                                    "Wikimedia Commons first",
+                                    "Openverse (CC) first",
+                                    "General web search first"],
+                                   default_idx=0, input_fn=inp)
+            if pref is None:
+                return None
+            img_opts["sourcePreference"] = ("auto", "nasa", "wikimedia",
+                                            "openverse", "general")[pref]
         opts["images"] = img_opts
 
     # ── motion (like PowerPoint's ease: transition + entrance) ──
@@ -1865,6 +1893,9 @@ def _cli_describe_options(opts, kind, slides=0):
         key_ok = bool(_cli_vault_key(img_key_id))
         parts.append(f"image key: {c(32, '✓ set') if key_ok else c(31, '✗ MISSING')} "
                      f"({img_key_id}, images-only)")
+        parts.append(f"visual source: {img.get('mode') or 'smart'}"
+                     + (f" ({img.get('sourcePreference') or 'auto'})"
+                        if (img.get('mode') or 'smart') in ('smart', 'web') else ""))
     say(f"  {c(37, 'You chose:')} " + " · ".join(parts))
 
 

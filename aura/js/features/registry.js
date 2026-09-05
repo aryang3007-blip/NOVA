@@ -21,7 +21,8 @@ export const FEATURE_MANIFEST = {
         speed: 'med', animation: 'none', model: 'gemini-3.8-flash',
         images: { enabled: true, count: 1, style: 'flat illustration',
                   provider: 'gemini', model: 'gemini-3.1-flash-image',
-                  keyId: 'gemini-image' },
+                  keyId: 'gemini-image', mode: 'smart',
+                  sourcePreference: 'auto' },
       },
     },
     docx: {
