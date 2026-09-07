@@ -28,7 +28,7 @@ Most pure-python suites (usage, controls, terminal-cli) run fine under
 | Usage/budget/DB API | `python3 tests/test-usage.py` | 24 |
 | Docgen pipeline | `/tmp/pw2/bin/python tests/test-docgen.py` | 89 |
 | Features (manifest/images/VRE/db-page) | `/tmp/pw2/bin/python tests/test-features.py` | 131 |
-| Terminal CLI | `/tmp/pw2/bin/python tests/test-terminal-cli.py` | 66 |
+| Terminal CLI | `/tmp/pw2/bin/python tests/test-terminal-cli.py` | 89 |
 | Feature registry | `node tests/test-feature-registry.mjs` | 23 |
 | Feature apps/intents | `node tests/test-feature-apps.mjs` | 33 |
 | Doc agent (outline) | `node tests/test-doc-agent.mjs` | 98 |
