@@ -50,6 +50,7 @@ Arguments are read from `sys.argv` by simple `in` checks — not argparse.
 | `/doc report on X` | Build .docx |
 | `/organize` | Preview/apply/undo file organisation in a folder |
 | `/apps` | List installed apps (with `--allow-actions`) |
+| `/phone` | **Hardcoded phone companion commands** — `devices`, `apps` (shortcut catalog), `battery`, `caps`, `open <device> <app\|url>`, `notify`, `vibrate`, `camera`, `mic`, `ping`, `pair`, `pair-cancel`, `unpair` (see `serve._phone_cli`) |
 | `/status` `/sys` | Banner, flags, AI state, desktop actions, LAN |
 | `/policy` | Show/set the action permission policy |
 | `/help` `/clear` `/exit` | Help, clear, shutdown |

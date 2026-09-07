@@ -327,5 +327,91 @@ finally:
     serve._cli_set_api("", "")
     serve._CLI_VAT = None
 
+S("PHONE COMPANION CLI (/phone hardcoded commands)")
+from server import devices  # noqa: E402
+
+try:
+    devices.reset()
+    out = "\n".join(serve._phone_cli(""))
+    rec("bare /phone prints usage + transport", "PHONE COMPANION" in out
+        and "long-poll" in out and "/phone devices" in out)
+    rec("bare /phone lists device capabilities",
+        "open_url" in out and "vibrate" in out)
+
+    out = "\n".join(serve._phone_cli("devices"))
+    rec("no devices → honest hint to pair", "No devices paired" in out
+        and "/phone pair" in out)
+
+    out = "\n".join(serve._phone_cli("battery"))
+    rec("battery with no phone → honest resolve error",
+        "No phone is paired" in out)
+
+    # simulate a full pairing + heartbeat (no sockets, in-memory)
+    p = devices.start_pairing(port=8001)
+    rr = devices.pair(p["code"], "Pixel Test", "android",
+                      capabilities=["open_url", "show_notification", "vibrate",
+                                    "device_status"])
+    did, tok = rr["deviceId"], rr["token"]
+    devices.heartbeat(did, tok, {"battery": 87})
+
+    out = "\n".join(serve._phone_cli("devices"))
+    rec("paired device listed with caps + connected",
+        "Pixel Test" in out and "● connected" in out and "open_url" in out
+        and did in out)
+
+    out = "\n".join(serve._phone_cli("battery"))
+    rec("battery from heartbeat", "87%" in out and "Pixel Test" in out)
+    out = "\n".join(serve._phone_cli(f"battery {did}"))
+    rec("battery resolves by device id too", "87%" in out)
+    out = "\n".join(serve._phone_cli("caps phone"))
+    rec("caps lists declared capabilities",
+        "can do" in out and "vibrate" in out)
+
+    out = "\n".join(serve._phone_cli("apps"))
+    rec("apps = hardcoded shortcut catalog",
+        "SHORTCUTS" in out and "youtube" in out and "https://m.youtube.com" in out)
+    rec("apps is honest about open_url only",
+        "open_url only" in out and "native apps" in out)
+
+    out = "\n".join(serve._phone_cli("open phone youtube"))
+    rec("open by catalog name queues open_url",
+        "Sent “open_url”" in out and "m.youtube.com" in out)
+    out = "\n".join(serve._phone_cli(f"open {did} https://example.com"))
+    rec("open by full URL queues open_url",
+        "Sent “open_url”" in out and "example.com" in out)
+    out = "\n".join(serve._phone_cli("open phone notanapp"))
+    rec("open unknown name → honest catalog miss",
+        "not in the hardcoded catalog" in out)
+
+    out = "\n".join(serve._phone_cli("notify phone Hello from terminal"))
+    rec("notify queues show_notification", "Sent “show_notification”" in out)
+    out = "\n".join(serve._phone_cli("vibrate phone 400"))
+    rec("vibrate queues with ms", "Sent “vibrate”" in out)
+    out = "\n".join(serve._phone_cli("ping phone"))
+    rec("ping queues device_status", "Sent “device_status”" in out)
+    out = "\n".join(serve._phone_cli("camera phone"))
+    rec("camera without capability → honest refusal",
+        "does not support“request_camera”".replace("“", "“") in out.replace(" ", "")
+        or "does not support" in out)
+    out = "\n".join(serve._phone_cli("open phone"))
+    rec("open without payload → usage", "Usage: /phone open" in out)
+
+    out = "\n".join(serve._phone_cli("pair"))
+    rec("pair starts a code + URL", "PAIRING STARTED" in out and "Code:" in out
+        and "/phone?code=" in out)
+    out = "\n".join(serve._phone_cli("pair-cancel"))
+    rec("pair-cancel clears the code", "cancelled" in out.lower())
+
+    out = "\n".join(serve._phone_cli(f"unpair {did}"))
+    rec("unpair forgets the device", "Unpaired" in out)
+    out = "\n".join(serve._phone_cli("devices"))
+    rec("devices empty after unpair", "No devices paired" in out)
+
+    out = "\n".join(serve._phone_cli("warp"))
+    rec("unknown subcommand → honest usage", "Unknown /phone subcommand" in out
+        and "battery" in out)
+except Exception as e:
+    rec("phone cli section ran", False, str(e))
+
 print(f"\n{'─'*56}\n  PASS {P}\tFAIL {F}")
 sys.exit(1 if F else 0)

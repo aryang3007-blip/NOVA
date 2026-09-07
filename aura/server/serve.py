@@ -2139,6 +2139,221 @@ def _cli_chat(text):
         say(c(31, f"  [Chat error {code}: {err}]"))
 
 
+# ── /phone — hardcoded phone companion commands ────────────────────────────
+# The AI's "open <app> on phone" route is model-dependent and only sends
+# open_url, so the terminal gets a deterministic fallback: /phone subcommands
+# that go straight through the Device Gateway (server/devices.py). This is an
+# ADDITION — the AI path is untouched.
+#
+# The companion executes exactly these actions (js/phone.js): open_url,
+# show_notification, vibrate, request_camera, request_microphone,
+# device_status. "Apps" on a phone = URL shortcuts it can open in its browser;
+# it cannot launch installed native apps — that is stated, not hidden.
+_PHONE_APP_CATALOG = {
+    "google":    ("https://www.google.com",         "Web search"),
+    "youtube":   ("https://m.youtube.com",          "Video"),
+    "maps":      ("https://maps.google.com",        "Maps / directions"),
+    "gmail":     ("https://mail.google.com",        "Mail"),
+    "whatsapp":  ("https://web.whatsapp.com",       "Messaging (web client)"),
+    "chatgpt":   ("https://chatgpt.com",            "AI chat"),
+    "wikipedia": ("https://en.m.wikipedia.org",     "Reference"),
+    "translate": ("https://translate.google.com",   "Translation"),
+    "calendar":  ("https://calendar.google.com",    "Calendar"),
+    "drive":     ("https://drive.google.com",       "Files"),
+    "photos":    ("https://photos.google.com",      "Photos"),
+    "news":      ("https://news.google.com",        "News"),
+}
+
+_PHONE_USAGE = (
+    "  Usage:\n"
+    "    /phone                      status + this help\n"
+    "    /phone devices              list paired devices\n"
+    "    /phone apps                 list phone-openable shortcuts (hardcoded)\n"
+    "    /phone battery [device]     battery level from the phone's heartbeat\n"
+    "    /phone caps [device]        what the device declared it can do\n"
+    "    /phone open <device> <app|url>   open a shortcut or a full http(s) URL\n"
+    "    /phone notify <device> <text>    show a notification on the device\n"
+    "    /phone vibrate <device> [ms]     vibrate (phones with a motor only)\n"
+    "    /phone camera <device>      request camera access on the device\n"
+    "    /phone mic <device>         request microphone access on the device\n"
+    "    /phone ping <device>        send device_status and wait for the ack\n"
+    "    /phone pair                 start pairing (6-digit code + URL)\n"
+    "    /phone pair-cancel          cancel the pairing code\n"
+    "    /phone unpair <device>      forget a paired device\n"
+    "  <device> defaults to 'phone' (the single paired phone)."
+)
+
+
+def _phone_dev_line(d):
+    """One formatted line for a paired device."""
+    bat = f"{d.get('battery')}%" if d.get("battery") is not None else "no battery report"
+    lat = f"{d.get('latencyMs')} ms" if d.get("latencyMs") is not None else "latency —"
+    state = "● connected" if d.get("status") == "connected" else "○ offline"
+    caps = ", ".join(d.get("capabilities") or []) or "none declared"
+    return (f"  • {d.get('id')}  \"{d.get('name')}\"  {state}  "
+            f"battery {bat} · {lat} · sent {d.get('actionsSent', 0)}/"
+            f"acked {d.get('actionsAcked', 0)}\n"
+            f"    caps: {caps}")
+
+
+def _phone_resolve(ref, label="phone"):
+    """Resolve a device ref → (dev_dict | None, error line | None)."""
+    did, err = devices.resolve(ref or label)
+    if err:
+        return None, err
+    lst = devices.list_devices().get("devices", [])
+    dev = next((d for d in lst if d.get("id") == did), None)
+    if dev is None:
+        return None, f"{did} is not paired."
+    return dev, None
+
+
+def _phone_cli(arg=""):
+    """Hardcoded /phone command. Pure — returns printable lines; no I/O.
+    This replaces nothing: the AI's device route keeps working as before."""
+    if devices is None:
+        return ["  Device gateway unavailable (server/devices.py failed to import)."]
+    parts = (arg or "").split(maxsplit=1)
+    sub = parts[0].lower() if parts else ""
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    out = []
+
+    if sub in ("", "help"):
+        st = devices.status()
+        out.append("")
+        out.append(c(36, "── PHONE COMPANION ──────────────────────────────────────────────"))
+        out.append(f"  Transport:   {st.get('transport')} (long-poll, stdlib only)")
+        out.append(f"  Paired:      {st.get('count', 0)} device(s), {st.get('connected', 0)} connected")
+        act = st.get("pairing", {})
+        if act.get("active"):
+            out.append(f"  Pairing:     active — code {act.get('code')} ({act.get('expiresIn')}s left)")
+        else:
+            out.append("  Pairing:     none active (/phone pair to start)")
+        out.append(f"  Device actions: {', '.join(st.get('capabilities') or [])}")
+        out.append(_PHONE_USAGE)
+        return out
+
+    if sub == "pair":
+        r = devices.start_pairing(PORT)
+        if not r.get("ok"):
+            return ["  Pairing failed: " + str(r.get("message", "unknown"))]
+        out.append("")
+        out.append(c(36, "── PAIRING STARTED ─────────────────────────────────────────────"))
+        out.append(f"  Code:  {c(32, r['code'])}   (valid {r.get('expiresIn', 180)}s, single use)")
+        if r.get("url"):
+            out.append(f"  Open:  {r['url']}")
+        out.append("  Then on the phone: open /phone, choose the platform, enter the code.")
+        return out
+
+    if sub == "pair-cancel":
+        r = devices.cancel_pairing()
+        return [f"  {r.get('message', 'Pairing cancelled.')}"]
+
+    if sub == "devices":
+        st = devices.list_devices()
+        devs = st.get("devices", [])
+        out.append("")
+        out.append(c(36, f"── PAIRED DEVICES ({st.get('count', 0)}, "
+                         f"{st.get('connected', 0)} connected) ────────────────"))
+        if not devs:
+            out.append("  No devices paired yet. /phone pair, then enter the code on the device.")
+        for d in devs:
+            out.append(_phone_dev_line(d))
+        return out
+
+    if sub == "apps":
+        out.append("")
+        out.append(c(36, "── PHONE-OPENABLE SHORTCUTS (hardcoded catalog) ───────────────"))
+        for name, (url, what) in sorted(_PHONE_APP_CATALOG.items()):
+            out.append(f"  {c(32, name):<12} -> {url}  ({what})")
+        out.append("  Note: the companion executes open_url only — it cannot launch")
+        out.append("  installed native apps. Open one with: /phone open <device> <name>")
+        st = devices.list_devices()
+        for d in st.get("devices", []):
+            out.append(_phone_dev_line(d))
+        return out
+
+    if sub == "battery":
+        dev, err = _phone_resolve(rest)
+        if err:
+            return ["  " + err]
+        if dev.get("status") != "connected":
+            return [f"  {dev.get('name')} is offline — open AURA on the device to reconnect."]
+        if dev.get("battery") is None:
+            return [f"  {dev.get('name')}: no battery report yet — the heartbeat sends it "
+                    "within ~7s of the device being open."]
+        return [f"  {dev.get('name')} battery: {c(32, str(dev.get('battery')) + '%')}"
+                + (f"  (latency {dev.get('latencyMs')} ms)" if dev.get("latencyMs") else "")]
+
+    if sub == "caps":
+        dev, err = _phone_resolve(rest)
+        if err:
+            return ["  " + err]
+        caps = ", ".join(dev.get("capabilities") or []) or "none declared"
+        return [f"  {dev.get('id')} \"{dev.get('name')}\" ({dev.get('platformLabel')}) can do: {caps}"]
+
+    if sub == "unpair":
+        dev, err = _phone_resolve(rest)
+        if err:
+            return ["  " + err]
+        r = devices.unpair(dev.get("id"))
+        return [f"  {r.get('message', 'Unpaired.')}"]
+
+    # ── actions that get QUEUED to the device (open_url / notify / vibrate /
+    #    camera / mic / ping). send_action validates resolve, connectivity,
+    #    capability and the queue size, and reports every failure honestly. ──
+    def _send(action_label, action, params, how=""):
+        # open/notify/vibrate take "<device> <payload>"; the others take
+        # just "<device>".
+        if action_label in ("open", "notify", "vibrate"):
+            subparts = rest.split(maxsplit=1)
+            if len(subparts) < 2:
+                return [f"  Usage: /phone {action_label} <device> {how}"]
+            ref = subparts[0]
+            payload = subparts[1].strip() or ""
+            if action_label == "open":
+                url = payload if _re.match(r"^https?://", payload) else None
+                if url is None:
+                    hit = _PHONE_APP_CATALOG.get(payload.strip().lower())
+                    if hit:
+                        url = hit[0]
+                    else:
+                        return [f"  “{payload}” is not in the hardcoded catalog — "
+                                "pass a full http(s) URL, or see /phone apps."]
+                r = devices.send_action(ref, "open_url", {"url": url})
+                return [f"  {('✓ ' if r.get('ok') else '✗ ')}{r.get('message', '')}"
+                        + (f"  ({url})" if r.get('ok') else "")]
+            if action_label == "notify":
+                r = devices.send_action(ref, "show_notification",
+                                        {"title": "AURA", "body": payload})
+                return [f"  {('✓ ' if r.get('ok') else '✗ ')}{r.get('message', '')}"]
+            ms_match = _re.search(r"\d+", payload)
+            ms = int(ms_match.group()) if ms_match else 220
+            r = devices.send_action(ref, "vibrate", {"ms": ms})
+            return [f"  {('✓ ' if r.get('ok') else '✗ ')}{r.get('message', '')}"]
+        dev, err = _phone_resolve(rest)
+        if err:
+            return ["  " + err]
+        r = devices.send_action(dev.get("id"), action, params)
+        return [f"  {('✓ ' if r.get('ok') else '✗ ')}{r.get('message', '')}"]
+
+    if sub == "open":
+        return _send("open", "open_url", {}, "<name|url>")
+    if sub == "notify":
+        return _send("notify", "show_notification", {}, "<text>")
+    if sub == "vibrate":
+        return _send("vibrate", "vibrate", {}, "[ms]")
+    if sub == "camera":
+        return _send("camera", "request_camera", {})
+    if sub == "mic":
+        return _send("mic", "request_microphone", {})
+    if sub == "ping":
+        return _send("ping", "device_status", {})
+
+    return ["  Unknown /phone subcommand. " + _PHONE_USAGE.splitlines()[1].strip()
+            + "\n  e.g. /phone battery, /phone apps, /phone open phone youtube"]
+
+
 def _terminal_repl_loop():
     global _CLI_MODEL
     import time
@@ -2172,6 +2387,7 @@ def _terminal_repl_loop():
                     say(f"  {c(33, '/policy')}              View Action Bridge security policy")
                     say(f"  {c(33, '/status')}              System telemetry (CPU, RAM, backend)")
                     say(f"  {c(33, '/apps')}                List detected local desktop applications")
+                    say(f"  {c(33, '/phone')}               Phone companion: devices, battery, apps, notify, open, pair…")
                     say(f"  {c(33, '/open <app|url>')}    Launch desktop app or website")
                     say(f"  {c(33, '/clear')}               Clear screen & refresh dashboard")
                     say(f"  {c(33, '/exit')} / {c(33, '/quit')}       Shut down AURA server\n")
@@ -2326,6 +2542,9 @@ def _terminal_repl_loop():
                         if len(apps) > 20:
                             say(f"  ...and {len(apps) - 20} more.")
                         say("")
+                elif cmd in ("/phone",):
+                    for line in _phone_cli(arg):
+                        say(line)
                 elif cmd in ("/open",):
                     if not arg:
                         say(c(31, "  Usage: /open <app_name_or_url>  (e.g., /open spotify)"))

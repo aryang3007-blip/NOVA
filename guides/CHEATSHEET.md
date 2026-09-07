@@ -10,6 +10,10 @@ cd aura
 
 Pages: `/` `/screen` `/phone` `/db` `/dev` `/dev/image-test.html` `/controls`
 
+Phone (terminal, hardcoded — no AI involved): `/phone devices`, `/phone apps`,
+`/phone battery`, `/phone caps`, `/phone open phone youtube`, `/phone notify phone …`,
+`/phone vibrate phone 400`, `/phone ping phone`, `/phone pair`, `/phone unpair …`
+
 ## Reset everything (after any demo toggle)
 
 ```bash
