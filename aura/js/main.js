@@ -16,7 +16,7 @@ import { SpeechInput, SpeechOutput, stripMarkdownForSpeech } from './voice/speec
 import { WakeWordEngine } from './voice/wake-word-engine.js';
 import { VisionModule } from './vision/vision.js';
 import { GESTURES } from './vision/gesture-classifier.js';
-import { applyFlagVisibility, label as flagLabel } from './features/controls.js';
+import { applyFlagVisibility, label as flagLabel, renderControlsChip } from './features/controls.js';
 import { Avatar3D } from './avatar/avatar3d.js';
 import { AvatarManager } from './avatar/avatar-manager.js';
 import { OUTFITS, PALETTES, ACCESSORIES, HAIRSTYLES, HAIR_COLORS, BODY_PRESETS } from './avatar/outfits.js';
@@ -51,6 +51,7 @@ import { ScreenCursor } from './vision/screen-cursor.js';
 import { FOLLOWUP_WINDOW_MS, REARM_DELAY_MS, shouldRearmCommander, followupOpen } from './voice/commander.js';
 import { openFeature } from './features/launcher.js';
 import { parseFeatureIntent } from './features/intent.js';
+import { parseDeviceVoiceIntent } from './ai/device-router.js';
 import { InteractionManager, DWELL_EV } from './vision/interaction-manager.js';
 import { TraceView } from './ui/trace-view.js';
 
@@ -920,7 +921,12 @@ class AuraApp {
         const first = document.querySelector('.tab:not([hidden])');
         if (first) first.dispatchEvent(new Event('click'));
       }
+      // Demo-state chip: how many features are OFF, right now, in the topbar.
+      renderControlsChip($('controls-chip'));
     });
+    // Keep the chip honest as flags change elsewhere (controls page, resets,
+    // feature launcher toasts) by re-reading on window focus.
+    window.addEventListener('focus', () => renderControlsChip($('controls-chip')));
     this.devConsole?.mount();
     this.wireAvatarHeight();
     $('face-enrol')?.addEventListener('click', () => this.startFaceEnrollment());
@@ -3318,8 +3324,45 @@ class AuraApp {
    */
   maybeFeatureIntent(text) {
     const f = parseFeatureIntent(text);
-    if (!f) return false;
-    this.openFeaturePopup(f.kind, f.prefill);
+    if (f) {
+      this.openFeaturePopup(f.kind, f.prefill);
+      return true;
+    }
+    // Voice follow-up / natural-language device commands: "open youtube on my
+    // phone", "find my phone", "what's my phone battery" — same canonical
+    // /devices path as typing it, so it works on the offline core with no
+    // model call. parseDeviceVoiceIntent is deliberately conservative; a
+    // non-match returns false and the reply goes to the model as before.
+    if (this.maybeDeviceIntent(text)) return true;
+    return false;
+  }
+
+  /**
+   * Deterministic device command from natural language (typed or spoken).
+   * Async by nature (bridge round trip) but returns a boolean immediately so
+   * callers can stop the AI route; the result lands in the transcript.
+   *
+   * @param {string} text
+   * @returns {boolean} true when a device intent was recognized
+   */
+  maybeDeviceIntent(text) {
+    const p = parseDeviceVoiceIntent(text);
+    if (!p) return false;
+    const A = this.actions;
+    const finish = (r) => {
+      const msg = r?.ok ? r.message : `⚠ ${r?.message || 'Device command failed.'}`;
+      this.pushAssistantMessage(msg);
+      this.pushEventLog(`device voice: ${p.sub} ${p.arg}`.trim());
+      this.setCaption(String(msg).slice(0, 150));
+      this.audio?.sfx?.(r?.ok ? 'confirm' : 'error');
+    };
+    if (!A?.available) {
+      finish({ ok: false, message: 'No action bridge. Restart with `python serve.py --allow-actions`.' });
+      return true;
+    }
+    // '/' prefix keeps the device handler honest: unknown subcommands get the
+    // canonical usage text just like the typed command.
+    A.deviceCommand(p.sub, p.arg).then(finish).catch((e) => finish({ ok: false, message: String(e?.message || e) }));
     return true;
   }
 

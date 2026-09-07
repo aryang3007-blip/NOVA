@@ -35,8 +35,7 @@ export function registerBuiltins(registry, ctx) {
     commands: [{
       name: 'motd', aliases: ['about', 'info', 'version'], usage: '/motd',
       help: 'Version, build + management page shortcuts',
-      run: async () => {
-        const pick = (obj, k) => (obj && obj[k] != null) ? obj[k] : '—';
+      run: async (_a, c) => {
         let ver = null, st = null;
         try {
           ver = await (await fetch('/api/version', { cache: 'no-store' })).json();
@@ -47,7 +46,26 @@ export function registerBuiltins(registry, ctx) {
         const v = (ver && ver.ok) ? `**NOVA v${ver.version}** — ${ver.codename || ''} (${ver.date || '—'})` : '**NOVA** — version endpoint unreachable';
         const bridge = st ? (st.actionsEnabled ? '🟢 actions enabled' : '🟡 actions off (`--allow-actions`)') : '🟡 server off';
         const os = st?.os ? ` · ${st.os}` : '';
-        return `${v}\n\n_${bridge}${os}_\n\n` +
+        // Phone status broadcast: whatever the bridge says about paired
+        // devices is always in /motd — one canonical source, never faked.
+        let devLine = '';
+        try {
+          const A = c.ui?.actions;
+          if (A?.available) {
+            const d = await A.deviceList();
+            const devs = d?.devices || [];
+            devLine = devs.length
+              ? devs.map(x => `• 📱 **${x.name}** \`${x.id}\` — ${x.status === 'connected' ? '🟢 connected' : '⚪ offline'}`
+                  + (x.battery != null ? ` · battery ${x.battery}%` : '')
+                  + (x.latencyMs != null ? ` · ${x.latencyMs}ms` : '')).join('\n')
+              : '• 📱 No device paired — `/devices pair` to connect your phone.';
+          } else {
+            devLine = '• 📱 Device bridge offline (restart with `--allow-actions`)';
+          }
+        } catch {
+          devLine = '• 📱 Device status unavailable';
+        }
+        return `${v}\n\n_${bridge}${os}_\n\n${devLine}\n\n` +
           `• \`/controls\` — Master Controls (features on/off)\n` +
           `• \`/db\` — Database manager (settings, budget, usage, backup)\n` +
           `• \`/dev\` — this build's release notes\n` +
@@ -93,8 +111,8 @@ export function registerBuiltins(registry, ctx) {
         },
       },
       {
-        name: 'timer', usage: '/timer <seconds> [label]', help: 'Set a countdown that really fires',
-        run: async (args) => {
+        name: 'timer', usage: '/timer <seconds> [label]', help: 'Set a countdown that really fires (and buzzes your phone)',
+        run: async (args, c) => {
           const m = /^(\d+)\s*(.*)$/.exec(args.trim());
           if (!m) return 'Usage: `/timer 60 tea`';
           const secs = parseInt(m[1], 10);
@@ -104,8 +122,22 @@ export function registerBuiltins(registry, ctx) {
             bus.emit(EV.UI_TOAST, { type: 'success', text: `⏰ ${label} — time's up!`, duration: 8000 });
             audio?.sfx('confirm');
             voice?.output?.speak(`${label} complete.`);
+            // Timer → phone notify: when the countdown fires, the paired
+            // phone is buzzed AND notified (same canonical device command;
+            // fail-silent when no bridge/device — the timer itself is real).
+            const A = c.ui?.actions;
+            if (A?.available) {
+              A.deviceCommand('notify', `⏰ ${label} — time's up!`)
+                .then((r) => {
+                  if (r?.ok) {
+                    A.deviceCommand('vibrate', '400').catch(() => {});
+                    bus.emit(EV.UI_TOAST, { type: 'info', text: '📱 Phone notified.' });
+                  }
+                })
+                .catch(() => {});
+            }
           }, secs * 1000);
-          return `⏱ Timer armed: **${secs}s** (${label}). I'll announce it out loud.`;
+          return `⏱ Timer armed: **${secs}s** (${label}). I'll announce it out loud — and buzz your phone.`;
         },
       },
     ],
@@ -354,6 +386,58 @@ export function registerBuiltins(registry, ctx) {
         run: async () => ui.runSelfTest(),
       },
     ],
+  });
+
+  /* ── demo deck — canned 5 slides, zero model calls ─────────────────
+   * For the competition / a quick showcase: /demo builds a REAL pptx
+   * straight from a fixed spec. No language model is consulted, so it
+   * works on a stage with no internet, no API key, no Ollama pull.
+   * Honest about that on the slide and in the transcript. */
+  registry.register({
+    id: 'demo', name: 'Demo Deck', description: 'Instant canned 5-slide AURA showcase deck (no model needed).',
+    commands: [{
+      name: 'demo', aliases: ['demodeck', 'showcase'], usage: '/demo',
+      help: 'Build a canned 5-slide AURA showcase deck — no model, works offline',
+      run: async (_args, c) => {
+        const A = c.ui?.actions;
+        if (!A?.available) return '⚠ No action bridge. Restart with `python serve.py --allow-actions`.';
+        const caps = await A.docCapabilities();
+        if (!caps?.pptx) {
+          return '⚠ PowerPoint generation needs python-pptx on the server:\n```\npip install python-pptx\n```';
+        }
+        const spec = {
+          title: 'AURA — Live Demo',
+          subtitle: 'Five slides, zero model calls — built by the deterministic demo template.',
+          slides: [
+            { kind: 'title', title: 'AURA', purpose: 'Cover',
+              bullets: ['Adaptive Unified Response Assistant'] },
+            { kind: 'bullets', title: 'What AURA is', purpose: 'Frame',
+              bullets: ['A desktop AI assistant that runs in the browser',
+                        'Voice, vision, gestures and an avatar',
+                        'No cloud required for the core'] },
+            { kind: 'bullets', title: 'Feature tour', purpose: 'Showcase',
+              bullets: ['Open apps and control media',
+                        'Recognise faces and gestures',
+                        'Generate slides, sheets and documents',
+                        'Open YouTube on your phone'] },
+            { kind: 'bullets', title: 'Live demo', purpose: 'Flow',
+              bullets: ['/motd — system status',
+                        '/devices locate — find the phone',
+                        '/demo — this deck, built now',
+                        '/status — full diagnostics'] },
+            { kind: 'conclusion', title: 'Try it yourself', purpose: 'Close',
+              bullets: ['Type /help for every command',
+                        'Open /controls to turn features on or off',
+                        'Ask AURA anything'] },
+          ],
+        };
+        const r = await A.docBuild('pptx', spec, c.ui?.docFolder?.());
+        if (!r?.ok) return `⚠ ${r?.message || 'Could not build the deck.'}`;
+        return `📽 **AURA demo deck created** — 5 slides, built from the canned template (no model was consulted).\n\n` +
+               `\`${r.path}\`  ·  ${(r.bytes / 1024).toFixed(1)} KB\n\n` +
+               `_Run \`/demo\` again any time — it never needs internet or a model._`;
+      },
+    }],
   });
 
   /* ── web research (real: ddgs + trafilatura via serve.py) ───────── */

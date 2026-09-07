@@ -50,8 +50,10 @@ Arguments are read from `sys.argv` by simple `in` checks — not argparse.
 | `/doc report on X` | Build .docx |
 | `/organize` | Preview/apply/undo file organisation in a folder |
 | `/apps` | List installed apps (with `--allow-actions`) |
-| `/devices` *(chat)* | **Full device command family** — `list`, `pair`, `battery`, `apps` (shortcut catalog), `open <device> <name\|url>` (device optional → the phone), `notify`, `vibrate`, `locate`, `camera`, `mic`, `ping`, `caps`, `unpair` (canonical `server/devices.command`) |
-| `/motd` `/ping` *(chat)* | Version + management-page shortcuts; server round-trip + subsystem health |
+| `/devices` *(chat)* | **Full device command family** — `list`, `pair`, `battery`, `apps` (shortcut catalog), `open <device> <name\|url>` (device optional → the phone), `notify`, `vibrate`, `locate`, `camera`, `mic`, `ping`, `caps`, `unpair`, plus per-device **policy**: `allow`/`deny <device> <action>`, `policy [device]`, `policy-clear <device>` (canonical `server/devices.command`) |
+| `/motd` `/ping` *(chat)* | Version + management-page shortcuts **+ live phone status** (paired, connected, battery); server round-trip + subsystem health |
+| `/demo` *(chat)* | Canned **5-slide AURA showcase deck** — built from a fixed template, zero model calls, works offline |
+| `/timer <s> [label]` *(chat)* | Real countdown — announces it AND buzzes/notifies the paired phone |
 | `/phone` | Terminal alias for the same device commands |
 | `/status` `/sys` | Banner, flags, AI state, desktop actions, LAN |
 | `/policy` | Show/set the action permission policy |

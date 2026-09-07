@@ -15,7 +15,17 @@ Devices (chat `/devices …` or terminal `/phone …` — one canonical
 `open android-001 https://x.com`, `notify hello there`, `vibrate 400`,
 `locate`, `camera`, `mic`, `ping`, `caps`, `unpair` — device defaults to
 the single paired phone; all failures honest.
-Chat extras: `/motd` (version + page shortcuts), `/ping` (server health).
+Device policy (per-device allow/deny, in-memory, deny wins, "all" wildcard,
+"none" clears): `/devices allow|deny <device> <action>`, `/devices policy`,
+`/devices policy-clear <device>`; bridge action `device_policy`.
+Voice follow-ups: "open youtube on my phone", "find my phone", "notify my
+phone …" after a wake word → same canonical command (js/ai/device-router.js,
+conservative — no phone ref ⇒ left to the model).
+Companion quick buttons: `/phone` page has one-tap YouTube/Maps/Gmail/
+WhatsApp/Google + Notify me + Buzz + Test cam (same execute() switch).
+Chat extras: `/motd` (version + page shortcuts + live phone status),
+`/ping` (server health), `/demo` (canned 5-slide deck, no model),
+`/timer` (announces AND buzzes the phone).
 
 ## Reset everything (after any demo toggle)
 

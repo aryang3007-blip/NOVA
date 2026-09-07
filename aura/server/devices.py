@@ -77,6 +77,10 @@ _queues = {}           # id -> list[action]
 _events = []           # recent gateway events, for the UI
 _pairing = {"code": None, "expires": 0}
 _counter = {"n": 0}
+# Per-device action policy: id -> {"allow": set[str], "deny": set[str]}.
+# In-memory like the live heartbeats (pairings persist; policies are a
+# runtime security posture and are deliberately NOT durable).
+_policy = {}
 
 
 def _load_saved_devices():
@@ -134,6 +138,7 @@ def _is_connected(d):
 
 def _public(d):
     """Device as the UI sees it. The token is NEVER included."""
+    p = _policy.get(d["id"], {})
     return {
         "id": d["id"], "name": d["name"], "platform": d["platform"],
         "kind": d.get("kind", "phone"),
@@ -147,6 +152,8 @@ def _public(d):
         "queued": len(_queues.get(d["id"], [])),
         "actionsSent": d.get("actionsSent", 0),
         "actionsAcked": d.get("actionsAcked", 0),
+        "policy": {"allow": sorted(p.get("allow") or []),
+                   "deny": sorted(p.get("deny") or [])},
     }
 
 
@@ -368,6 +375,7 @@ def unpair(device_id):
     with _lock:
         d = _devices.pop(device_id, None)
         _queues.pop(device_id, None)
+        _policy.pop(device_id, None)
         if not d:
             return {"ok": False, "message": "No such device."}
         _log("unpaired", device=device_id)
@@ -524,6 +532,20 @@ def send_action(device_ref, action, params=None):
             return {"ok": False,
                     "message": f"{d['name']} does not support “{action}”. "
                                f"It reports: {', '.join(d['capabilities']) or 'nothing'}."}
+        # Per-device policy gate (allow/deny, "all" = wildcard). A DENY
+        # always wins; a non-empty ALLOW list means ONLY those actions pass.
+        pol = _policy.get(did, {})
+        deny = pol.get("deny") or set()
+        allow = pol.get("allow") or set()
+        if action in deny or "all" in deny:
+            return {"ok": False, "denied": True,
+                    "message": f"Denied by device policy: “{action}” is blocked "
+                               f"on {d['name']}. Lift it with /devices deny <device> none."}
+        if allow and action not in allow and "all" not in allow:
+            return {"ok": False, "denied": True,
+                    "message": f"Denied by device policy: “{action}” is not on "
+                               f"{d['name']}'s allowlist. Add it with "
+                               f"/devices allow <device> {action}."}
         q = _queues.setdefault(did, [])
         if len(q) >= MAX_QUEUE:
             return {"ok": False, "message": f"{d['name']} has too many pending actions."}
@@ -539,6 +561,77 @@ def list_devices():
         return {"ok": True, "devices": [_public(d) for d in _devices.values()],
                 "count": len(_devices),
                 "connected": sum(1 for d in _devices.values() if _is_connected(d))}
+
+
+# ── per-device action policy ────────────────────────────────────────────
+# DENY wins over ALLOW. "all" is the wildcard. An empty ALLOW means
+# everything not DENYed is allowed (default, fail-open for trust).
+VALID_POLICY_ACTIONS = KNOWN_CAPABILITIES | {"all", "none"}
+
+
+def _policy_dict(did):
+    return _policy.setdefault(did, {"allow": set(), "deny": set()})
+
+
+def set_policy(device_id, action, mode, enabled=True):
+    """
+    Add/remove an action on a device's allow/deny list.
+
+    mode: "allow" | "deny"  (enabled=True → add, False → remove)
+    action: a KNOWN_CAPABILITY, "all" (wildcard) or "none" (clear the list).
+    Returns {ok, message, policy}.
+    """
+    with _lock:
+        d = _devices.get(device_id)
+        if not d:
+            return {"ok": False, "message": f"{device_id} is not paired."}
+        a = str(action or "").strip().lower()
+        if a not in VALID_POLICY_ACTIONS:
+            return {"ok": False,
+                    "message": f"Unknown action '{a}'. Valid: "
+                               f"{', '.join(sorted(VALID_POLICY_ACTIONS))}."}
+        if mode not in ("allow", "deny"):
+            return {"ok": False, "message": "mode must be 'allow' or 'deny'."}
+        pol = _policy_dict(device_id)
+        if a == "none":
+            pol[mode].clear()
+        elif enabled:
+            pol[mode].add(a)
+        else:
+            pol[mode].discard(a)
+        _log("policy_changed", device=device_id, mode=mode, action=a,
+             enabled=bool(enabled))
+        return {"ok": True, "device": device_id,
+                "message": f"{'Cleared' if a == 'none' else ('Granted' if enabled else 'Removed')} "
+                           f"{'ALLOW' if mode == 'allow' else 'DENY'} "
+                           f"for “{a}” on {d['name']}.",
+                "policy": {"allow": sorted(pol["allow"]),
+                           "deny": sorted(pol["deny"])}}
+
+
+def clear_policy(device_id):
+    """Remove every allow/deny rule for a device (back to default-allowed)."""
+    with _lock:
+        d = _devices.get(device_id)
+        if not d:
+            return {"ok": False, "message": f"{device_id} is not paired."}
+        _policy.pop(device_id, None)
+        _log("policy_cleared", device=device_id)
+        return {"ok": True, "message": f"Policy cleared on {d['name']} — "
+                                       "all supported actions allowed."}
+
+
+def policy_status(device_id=None):
+    """Show the policy matrix: one device, or every paired device."""
+    with _lock:
+        if device_id:
+            d = _devices.get(device_id)
+            if not d:
+                return {"ok": False, "message": f"{device_id} is not paired."}
+            p = _policy.get(device_id, {"allow": set(), "deny": set()})
+            return {"ok": True, "devices": [_public(d)]}
+        return {"ok": True, "devices": [_public(d) for d in _devices.values()],
+                "count": len(_devices)}
 
 
 # ── device commands (canonical, one function for every UI) ─────────────────
@@ -577,6 +670,10 @@ _CMD_USAGE = (
     "  camera | mic [device]      request camera / microphone access\n"
     "  ping [device]              device_status round trip\n"
     "  unpair <device>            forget a device\n"
+    "  allow <device> <action>    add to the device allowlist\n"
+    "  deny <device> <action>     block an action (deny always wins; none = clear)\n"
+    "  policy [device]            show the per-device allow/deny matrix\n"
+    "  policy-clear <device>      remove every rule, back to default-allowed\n"
     "<device> defaults to the single paired phone."
 )
 
@@ -705,6 +802,54 @@ def command(sub="help", arg=""):
         r = unpair(dev["id"])
         return {"ok": True, "message": r.get("message", "Unpaired.")}
 
+    # ── per-device policy: allow / deny / policy / policy-clear ──────────
+    if sub in ("allow", "deny", "policy-clear"):
+        toks = arg.split()
+        if not toks:
+            return {"ok": False, "message": f"Usage: /devices {sub} <device> <action|none|all>"}
+        # First token is the device ONLY when it resolves (same rule as the
+        # action commands) — so "allow open_url" defaults to the phone.
+        first_resolves = bool(resolve(toks[0])[0])
+        if first_resolves and len(toks) > 1:
+            ref, rest = toks[0], toks[1:]
+        else:
+            ref, rest = "phone", toks
+        dev, err = _find(ref)
+        if err:
+            return {"ok": False, "message": err}
+        if sub == "policy-clear":
+            r = clear_policy(dev["id"])
+            return {"ok": True, "message": r.get("message", "Policy cleared.")}
+        if not rest:
+            return {"ok": False,
+                    "message": f"Usage: /devices {sub} <device> <action>\n"
+                               f"Actions: {', '.join(sorted(VALID_POLICY_ACTIONS))}"}
+        r = set_policy(dev["id"], rest[0], sub)
+        return {"ok": r.get("ok", False), "message": r.get("message", "")}
+
+    if sub == "policy":
+        dev, err = _find(arg) if arg else (None, None)
+        if err:
+            return {"ok": False, "message": err}
+        st = policy_status(dev["id"] if dev else None)
+        if not st.get("ok"):
+            return {"ok": False, "message": st.get("message", "Policy unavailable.")}
+        devs = st.get("devices", [])
+        if not devs:
+            out.append("DEVICE POLICY")
+            out.append("  No devices paired — nothing to protect yet.")
+            return {"ok": True, "message": "\n".join(out)}
+        out.append("DEVICE POLICY (allowlist wins only when non-empty; deny always wins)")
+        for d in devs:
+            pol = d.get("policy") or {}
+            allow = ", ".join(pol.get("allow") or []) or "— (everything allowed)"
+            deny = ", ".join(pol.get("deny") or []) or "—"
+            out.append(f"  • {d['id']} \"{d['name']}\"")
+            out.append(f"      allow: {allow}")
+            out.append(f"      deny:  {deny}")
+        out.append("  Change with: /devices allow|deny <device> <action> · policy-clear <device>")
+        return {"ok": True, "message": "\n".join(out)}
+
     if sub in ("open", "notify", "vibrate", "locate", "camera", "mic", "ping"):
         if sub in ("camera", "mic", "ping", "locate"):
             dev, err = _find(arg)
@@ -806,6 +951,6 @@ def status():
 def reset():
     """Test helper — clears all state."""
     with _lock:
-        _devices.clear(); _queues.clear(); _events.clear()
+        _devices.clear(); _queues.clear(); _events.clear(); _policy.clear()
         _pairing["code"] = None; _pairing["expires"] = 0; _counter["n"] = 0
         return {"ok": True}

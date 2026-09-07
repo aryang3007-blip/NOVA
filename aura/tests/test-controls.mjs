@@ -7,7 +7,7 @@
  *
  *   node tests/test-controls.mjs
  */
-import { loadFlags, isOn, applyFlagVisibility, setFlag, resetFlags } from '../js/features/controls.js';
+import { loadFlags, isOn, applyFlagVisibility, setFlag, resetFlags, demoSummary, renderControlsChip } from '../js/features/controls.js';
 
 let P = 0, F = 0;
 const ok = (n, c, d = '') => {
@@ -93,6 +93,41 @@ sec('Server rejection paths surface honestly');
 globalThis.fetch = async () => ({ ok: false, json: async () => ({ ok: false, message: 'locked' }) });
 const bad = await setFlag('page.controls', false);
 ok('rejected toggle returns {ok:false,message}', bad.ok === false && bad.message === 'locked');
+
+sec('Demo-state chip — mirror of the flag store, never a gate');
+globalThis.fetch = async () => ({
+  ok: true,
+  json: async () => ({ ok: true, flags: [
+    { id: 'page.live', on: false }, { id: 'page.db', on: false }, { id: 'panel.dev', on: true },
+  ] }),
+});
+const sum = await demoSummary(true);   // force: fresh read, not the cached store
+ok('demoSummary counts the OFF features', sum.offCount === 2 && sum.onCount === 1,
+   JSON.stringify(sum));
+ok('demoSummary labels the off features',
+   sum.off.some((o) => o.id === 'page.live') && sum.off.some((o) => o.label === 'Database manager'));
+
+let chip = { classList: { add() {}, remove() {} }, textContent: '', title: '' };
+await renderControlsChip(chip);
+ok('chip paints "2 OFF" with the flagged style',
+   chip.textContent.startsWith('2 OFF') && chip.title.includes('Database manager'),
+   JSON.stringify(chip));
+
+globalThis.fetch = async () => ({
+  ok: true,
+  json: async () => ({ ok: true, flags: [{ id: 'page.live', on: true }] }),
+});
+chip = { classList: { add() {}, remove() {} }, textContent: '', title: '' };
+await renderControlsChip(chip);
+ok('chip paints ALL ON when nothing is off',
+   chip.textContent.startsWith('ALL ON'), JSON.stringify(chip));
+
+// fail-open: unreachable store → chip says CHECKING, never a gate
+globalThis.fetch = async () => { throw new Error('down'); };
+chip = { classList: { add() {}, remove() {} }, textContent: '', title: '' };
+await renderControlsChip(chip);
+ok('chip never throws when the store is down',
+   typeof chip.textContent === 'string', JSON.stringify(chip));
 
 console.log(`\n\x1b[32mPASS ${P}\x1b[0m  \x1b[31mFAIL ${F}\x1b[0m`);
 process.exit(F ? 1 : 0);

@@ -336,10 +336,17 @@ function wire() {
     localStorage.removeItem(LS);
     app.id = null; app.token = null; app.polling = false;
     $('conn-card').classList.add('hide');
+    $('quick-card').classList.add('hide');
     $('pair-card').classList.remove('hide');
     log('Pairing forgotten.');
   });
   $('btn-cam').addEventListener('click', testCamera);
+
+  // Quick actions: one delegated listener for the button grid.
+  $('quick-btns')?.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-quick]');
+    if (b) quickRun(b.getAttribute('data-quick'));
+  });
 }
 
 async function doPair() {
@@ -378,10 +385,72 @@ function showConnected() {
   $('pair-card').classList.add('hide');
   $('conn-card').classList.remove('hide');
   $('log-card').classList.remove('hide');
+  $('quick-card').classList.remove('hide');
   $('d-id').textContent = app.id;
   $('d-name').textContent = app.name || '—';
   $('sub').textContent = 'Paired — keep this page open';
   renderCaps();
+  renderQuick();
+}
+
+/* ── quick actions ────────────────────────────────────────────────────────
+ * One tap, the same capability the laptop would use. Only buttons whose
+ * capability this device actually has are shown — an iPhone never gets a
+ * Buzz button it cannot honour. Executions run through the SAME execute()
+ * switch as queued actions; they just don't ACK a server-side action id. */
+const QUICK_APPS = [
+  { id: 'youtube', label: 'YouTube', url: 'https://m.youtube.com' },
+  { id: 'maps', label: 'Maps', url: 'https://maps.google.com' },
+  { id: 'gmail', label: 'Gmail', url: 'https://mail.google.com' },
+  { id: 'whatsapp', label: 'WhatsApp', url: 'https://web.whatsapp.com' },
+  { id: 'google', label: 'Google', url: 'https://www.google.com' },
+];
+
+function renderQuick() {
+  const host = $('quick-btns');
+  if (!host) return;
+  const has = (c) => (app.caps || []).includes(c);
+  const btns = [];
+  for (const a of QUICK_APPS) {
+    if (has('open_url')) {
+      btns.push(`<button data-quick="open:${a.url}">${a.label}<small>open_url</small></button>`);
+    }
+  }
+  if (has('show_notification')) {
+    btns.push(`<button data-quick="notify">Notify me<small>notification</small></button>`);
+  }
+  if (has('vibrate')) {
+    btns.push(`<button data-quick="vibrate" class="ok">Buzz<small>vibrate 400ms</small></button>`);
+  }
+  if ('getUserMedia' in navigator && navigator.mediaDevices?.getUserMedia) {
+    btns.push(`<button data-quick="camera-test">Test cam<small>getUserMedia</small></button>`);
+  }
+  host.innerHTML = btns.join('');
+}
+
+/** Run a quick action locally (no action id → no ACK round trip). */
+async function quickRun(id) {
+  if (!id) return;
+  if (id === 'notify') {
+    await execute({ id: 'quick', action: 'show_notification',
+                    params: { title: 'AURA', body: 'Quick action — tapped on the companion.' } },
+                  { ack: false });
+    return;
+  }
+  if (id === 'vibrate') {
+    await execute({ id: 'quick', action: 'vibrate', params: { ms: 400 } }, { ack: false });
+    return;
+  }
+  if (id === 'camera-test') {
+    await testCamera();
+    return;
+  }
+  if (id.startsWith('open:')) {
+    await execute({ id: 'quick', action: 'open_url', params: { url: id.slice(5) } },
+                  { ack: false });
+    return;
+  }
+  log(`Unknown quick action: ${id}`, 'bad');
 }
 
 /* ── transport ──────────────────────────────────────────────────────── */
@@ -457,7 +526,7 @@ function forceUnpair() {
 
 /* ── executing actions ──────────────────────────────────────────────── */
 
-async function execute(a) {
+async function execute(a, { ack = true } = {}) {
   let ok = true, detail = '';
   try {
     switch (a.action) {
@@ -516,6 +585,7 @@ async function execute(a) {
   }
   app.acts++;
   $('d-acts').textContent = String(app.acts);
+  if (!ack) return;   // quick actions run locally, nothing to acknowledge
   try {
     await post('/api/device/ack',
                { deviceId: app.id, token: app.token, actionId: a.id, success: ok, detail });

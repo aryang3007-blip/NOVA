@@ -125,6 +125,48 @@ export async function setFlag(id, enabled) {
   }
 }
 
+/**
+ * Demo-state summary for the topbar chip: which features are OFF.
+ * Fail-open — if the store cannot be read, the summary says "ON" rather
+ * than alarming the user; the chip is a mirror, never a gate.
+ * @param {boolean} [force]  re-read the store (the chip wants fresh truth)
+ * @returns {Promise<{off:Array<{id:string,label:string}>, onCount:number, offCount:number}>}
+ */
+export async function demoSummary(force = false) {
+  const s = await loadFlags(force);
+  const off = Object.entries(s)
+    .filter(([, v]) => v === false)
+    .map(([id]) => ({ id, label: label(id) }));
+  const onCount = Object.values(s).filter((v) => v !== false).length;
+  return { off, onCount, offCount: off.length };
+}
+
+/**
+ * Paint the topbar demo-state chip from the live flag state.
+ * @param {HTMLElement|null} el  the chip element
+ */
+export async function renderControlsChip(el) {
+  if (!el) return;
+  try {
+    const d = await demoSummary(true);   // fresh read: the chip mirrors /controls
+    el.classList.remove('loading');
+    if (!d.offCount) {
+      el.classList.add('on');
+      el.classList.remove('off');
+      el.textContent = `ALL ON · ${d.onCount}`;
+      el.title = `Master Controls — all ${d.onCount} features are ON`;
+    } else {
+      el.classList.add('off');
+      el.classList.remove('on');
+      el.textContent = `${d.offCount} OFF`;
+      el.title = `Master Controls — OFF: ${d.off.map((o) => o.label).join(', ')}`;
+    }
+  } catch {
+    el.classList.add('loading');
+    el.textContent = 'CHECKING…';
+  }
+}
+
 /** Reset every flag to ON; re-syncs cache. */
 export async function resetFlags() {
   try {

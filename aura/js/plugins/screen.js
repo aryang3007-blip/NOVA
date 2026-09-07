@@ -413,8 +413,8 @@ export function registerScreenPlugin(registry, ctx) {
 
       {
         name: 'devices', aliases: ['device'],
-        usage: '/devices [pair|list|battery|apps|open|notify|vibrate|locate|ping|caps|unpair|help]',
-        help: 'Pair and control companion devices (phone): list, battery, apps, open, notify, locate…',
+        usage: '/devices [pair|list|battery|apps|open|notify|vibrate|locate|ping|caps|unpair|allow|deny|policy|help]',
+        help: 'Pair and control companion devices (phone): list, battery, apps, open, notify, locate, policy…',
         run: async (args, c) => {
           const A = c.ui?.actions;
           if (!A?.available) return '⚠ No action bridge. Restart with `--allow-actions`.';

@@ -78,6 +78,15 @@
        color:var(--dim);background:rgba(0,0,0,.28);border-radius:12px;padding:9px 11px}
   .log div{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.045)}
   .log div:last-child{border-bottom:0}
+  /* quick actions — one tap, same code paths as the laptop sends */
+  .quick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .quick button{padding:12px 6px;font-size:10px;letter-spacing:.08em;line-height:1.3;
+                border-radius:13px;background:rgba(79,214,255,.09);
+                border:1px solid rgba(79,214,255,.25)}
+  .quick button:active{transform:scale(.95)}
+  .quick button small{display:block;font-size:8.5px;color:var(--faint);letter-spacing:.02em;
+                      margin-top:2px}
+  .quick .ok{background:rgba(78,242,167,.08);border-color:rgba(78,242,167,.25)}
   .note{margin-top:10px;padding:9px 12px;border-radius:12px;font-size:11.5px;
         color:var(--am);background:rgba(255,196,107,.09);border:1px solid rgba(255,196,107,.22)}
   .hide{display:none}
@@ -138,6 +147,16 @@
     <div class="kv"><span>Actions run</span><b id="d-acts">0</b></div>
     <div class="caps" id="caps"></div>
     <button class="wide" id="btn-unpair">FORGET THIS PAIRING</button>
+  </section>
+
+  <!-- QUICK ACTIONS — one tap on the phone, exactly the same actions the
+       laptop queues. No new server route: they run the same execute() switch
+       locally, so "open YouTube" here IS the open_url the /devices command
+       sends. Buttons for capabilities this device does not have are hidden. -->
+  <section class="card hide" id="quick-card">
+    <h2>⚡ Quick actions</h2>
+    <p>One tap — the exact actions AURA can send from your laptop.</p>
+    <div class="quick" id="quick-btns"></div>
   </section>
 
   <!-- CAMERA -->

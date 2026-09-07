@@ -160,6 +160,8 @@ export class LocalActions {
   devicePairStart() { return this.run('device_pair_start', {}); }
   devicePairCancel() { return this.run('device_pair_cancel', {}); }
   deviceUnpair(deviceId) { return this.run('device_unpair', { deviceId }); }
+  /** policy({device, action, mode, enabled}) · show({device}) · clear({device}) */
+  devicePolicy(opts = {}) { return this.run('device_policy', opts); }
 
   /* ── window management ────────────────────────────────────────────────── */
   windowStatus() { return this.run('window_status', {}); }

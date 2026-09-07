@@ -1,9 +1,41 @@
 {
-  "version": "1.7.0",
-  "codename": "NOVA Cognitive Assistant",
+  "version": "1.8.0",
+  "codename": "Seven-Feature Command Round",
   "date": "2026-09-07",
   "assertions": 3500,
   "releases": [
+    {
+      "version": "1.8.0",
+      "codename": "Seven-Feature Command Round",
+      "date": "2026-09-07",
+      "headline": "Six new capabilities, one canonical device engine: policy, voice, quick buttons, timer buzz, canned demo deck, live status chip.",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**Per-device policy** — `/devices allow|deny <device> <action>`, `policy`, `policy-clear`; deny wins, `all` wildcard, `none` clears; enforced in `server/devices.send_action` (bridge `device_policy`)."
+        },
+        {
+          "kind": "feature",
+          "text": "**Voice device follow-ups** — “open youtube on my phone”, “find my phone”, “notify my phone …” after a wake word run the same canonical command, no model needed (`js/ai/device-router.js`)."
+        },
+        {
+          "kind": "feature",
+          "text": "**Companion quick buttons** — `/phone` gets one-tap YouTube/Maps/Gmail/WhatsApp/Google, Notify me, Buzz and Test cam; only buttons the device can honour appear."
+        },
+        {
+          "kind": "feature",
+          "text": "**Timer → phone** — `/timer` now announces the countdown AND buzzes + notifies the paired phone."
+        },
+        {
+          "kind": "feature",
+          "text": "**`/demo`** — builds a real 5-slide AURA showcase pptx from a canned template: zero model calls, works offline on a stage."
+        },
+        {
+          "kind": "feature",
+          "text": "**Controls demo-state chip** — the topbar shows how many features are OFF right now (click → `/controls`); `/motd` also broadcasts live phone status."
+        }
+      ]
+    },
     {
       "version": "1.7.0",
       "codename": "Working Guides",

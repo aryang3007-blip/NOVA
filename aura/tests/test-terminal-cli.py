@@ -435,6 +435,53 @@ try:
     rc = _bridge.dispatch("device_apps", {})
     rec("bridge device_apps returns the shared catalog",
         rc.get("ok") and any(a["name"] == "youtube" for a in rc.get("apps", [])))
+
+    # ── per-device policy (allow / deny / policy / policy-clear) ──────
+    devices.reset()
+    sp = devices.start_pairing()
+    pr = devices.pair(sp["code"], "Policy Phone", "android",
+                      ["open_url", "show_notification", "vibrate", "device_status"])
+    pdid = pr["deviceId"]
+    devices.heartbeat(pdid, pr["token"], {"battery": 66})
+
+    rec("deny blocks the action at the gateway",
+        "Granted DENY" in devices.command(f"deny {pdid} open_url")["message"]
+        and "Denied by device policy" in devices.send_action(pdid, "open_url",
+                                                             {"url": "https://x.com"})["message"])
+    rec("deny does not block other actions",
+        "Sent" in devices.send_action(pdid, "show_notification",
+                                      {"title": "A", "body": "b"})["message"])
+    rec("deny none clears the deny list",
+        "Cleared" in devices.command(f"deny {pdid} none")["message"]
+        and "Sent" in devices.send_action(pdid, "open_url", {"url": "https://x.com"})["message"])
+    rec("empty allowlist keeps everything allowed",
+        "Sent" in devices.send_action(pdid, "vibrate", {"ms": 100})["message"])
+    rec("non-empty allowlist drops unlisted actions",
+        "Granted ALLOW" in devices.command(f"allow {pdid} show_notification")["message"]
+        and "Denied by device policy" in devices.send_action(pdid, "vibrate",
+                                                             {"ms": 100})["message"]
+        and "Sent" in devices.send_action(pdid, "show_notification",
+                                          {"title": "A", "body": "b"})["message"])
+    rec("all wildcard on the allowlist permits everything",
+        "Granted ALLOW" in devices.command(f"allow {pdid} all")["message"]
+        and "Sent" in devices.send_action(pdid, "vibrate", {"ms": 100})["message"])
+    rec("policy shows the per-device matrix",
+        "DEVICE POLICY" in devices.command("policy")["message"]
+        and "allow: all" in devices.command("policy")["message"])
+    rec("unknown action in policy is honest",
+        "Unknown action" in devices.command(f"allow {pdid} explode")["message"])
+    rec("policy-clear returns to default-allowed",
+        "Policy cleared" in devices.command(f"policy-clear {pdid}")["message"]
+        and "Sent" in devices.send_action(pdid, "open_url", {"url": "https://x.com"})["message"])
+    rc = _bridge.dispatch("device_policy", {"device": pdid, "action": "vibrate",
+                                            "mode": "deny"})
+    rec("bridge device_policy set works", rc.get("ok") and "DENY" in rc.get("message", ""))
+    rc = _bridge.dispatch("device_policy", {"device": pdid})
+    rec("bridge device_policy show works",
+        rc.get("ok") and rc.get("devices", [{}])[0].get("policy", {}).get("deny"))
+    rc = _bridge.dispatch("device_policy", {"device": pdid, "clear": True})
+    rec("bridge device_policy clear works",
+        rc.get("ok") and "Policy cleared" in rc.get("message", ""))
 except Exception as e:
     rec("device commands section ran", False, str(e))
 

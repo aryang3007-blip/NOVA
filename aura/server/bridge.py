@@ -1237,6 +1237,14 @@ def dispatch(action, params):
                                 str(p.get("arg") or ""))
         if sub == "apps":
             return _dev.app_catalog()
+        if sub == "policy":
+            # set: {device, action, mode, enabled} · show: {device} · clear: {device}
+            if p.get("action") and p.get("mode"):
+                return _dev.set_policy(p.get("device"), p.get("action"),
+                                       p.get("mode"), bool(p.get("enabled", True)))
+            if p.get("clear"):
+                return _dev.clear_policy(p.get("device"))
+            return _dev.policy_status(p.get("device"))
         return {"ok": False, "message": f"Unknown device action '{sub}'."}
 
     # ── window management (real OS API, never coordinates) ───────────────

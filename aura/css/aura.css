@@ -150,7 +150,21 @@ button { cursor: pointer; background: none; border: none; }
 .stat-k { font-size: .53rem; letter-spacing: .14em; color: var(--text-dim); opacity: .65; }
 .stat-v { font-family: var(--mono); font-size: .72rem; color: var(--text); font-weight: 500; }
 .tb-center { gap: 1.15rem !important; }
-.tb-right { display: flex; gap: .35rem; }
+.tb-right { display: flex; gap: .35rem; align-items: center; }
+/* Master Controls demo-state chip — everything ON = green, any OFF = amber,
+   and the title names the hidden features. Clicking opens /controls. */
+.controls-chip {
+  display: inline-flex; align-items: baseline; gap: .32rem;
+  padding: .3rem .55rem; border-radius: 9px; text-decoration: none;
+  border: 1px solid var(--edge); color: var(--text);
+  font-family: var(--mono); font-size: .62rem; letter-spacing: .1em;
+  white-space: nowrap; transition: border-color .15s, background .15s;
+}
+.controls-chip:hover { border-color: var(--accent); }
+.controls-chip.on { color: var(--good, #4ef2a7); border-color: rgba(78,242,167,.35); }
+.controls-chip.off { color: var(--amber, #ffc46b); border-color: rgba(255,196,107,.4);
+  background: rgba(255,196,107,.08); }
+.controls-chip.loading { color: var(--text-dim); }
 .icon-btn { width: 32px; height: 32px; border: 0; border-radius: 9px;
   color: var(--text-dim); background: transparent; font-size: .95rem;
   display: grid; place-items: center; transition: .18s; }
