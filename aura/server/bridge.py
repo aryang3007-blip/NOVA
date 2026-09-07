@@ -1230,6 +1230,13 @@ def dispatch(action, params):
             return _dev.cancel_pairing()
         if sub == "unpair":
             return _dev.unpair(p.get("deviceId"))
+        if sub == "command":
+            # canonical device command — the chat /devices subcommands and the
+            # terminal /phone subcommands run the SAME logic (one function).
+            return _dev.command(str(p.get("sub") or "help"),
+                                str(p.get("arg") or ""))
+        if sub == "apps":
+            return _dev.app_catalog()
         return {"ok": False, "message": f"Unknown device action '{sub}'."}
 
     # ── window management (real OS API, never coordinates) ───────────────

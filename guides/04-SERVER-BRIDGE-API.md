@@ -45,6 +45,7 @@ flow through it.
 |----------------|------------------|
 | `open_app`, `open_url`, `search`, `media`, `volume`, `screenshot`, `list_apps`, `running_apps`, `system_info`, `list_directory`, `read_file`, `write_file`, `open_folder`, `run_command`, `inspect_command`, `open_terminal`, `get_policy`, `set_policy`, `detect_apps`, `clipboard_read`, `clipboard_write`, `window_action` | bridge internals + `server/windows_mgr.py` |
 | `overlay_*`, `vdesk_*`, `device_*`, `window_*` | `overlay.py`, `vdesk.py`, `devices.py` |
+| `device_command` / `device_apps` | canonical `devices.command(sub, arg)` — the ONE implementation behind chat `/devices …`, terminal `/phone …` and this action |
 | `doc_capabilities`, `doc_build` (`doc_*`) | `services/docgen/service.py` |
 | `image_test` | dev harness → `services/docgen/images.generate` directly |
 | `web_capabilities`, `web_search`, `web_research`, `read_page` | `server/websearch.py` |

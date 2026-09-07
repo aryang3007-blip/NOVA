@@ -10,9 +10,12 @@ cd aura
 
 Pages: `/` `/screen` `/phone` `/db` `/dev` `/dev/image-test.html` `/controls`
 
-Phone (terminal, hardcoded — no AI involved): `/phone devices`, `/phone apps`,
-`/phone battery`, `/phone caps`, `/phone open phone youtube`, `/phone notify phone …`,
-`/phone vibrate phone 400`, `/phone ping phone`, `/phone pair`, `/phone unpair …`
+Devices (chat `/devices …` or terminal `/phone …` — one canonical
+`devices.command`): `list`, `pair`, `battery`, `apps`, `open youtube`,
+`open android-001 https://x.com`, `notify hello there`, `vibrate 400`,
+`locate`, `camera`, `mic`, `ping`, `caps`, `unpair` — device defaults to
+the single paired phone; all failures honest.
+Chat extras: `/motd` (version + page shortcuts), `/ping` (server health).
 
 ## Reset everything (after any demo toggle)
 

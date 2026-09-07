@@ -29,6 +29,58 @@ export function registerBuiltins(registry, ctx) {
     }],
   });
 
+  /* ── motd / about — version + management page shortcuts ─────────── */
+  registry.register({
+    id: 'motd', name: 'About', description: 'Version, build info and management pages.',
+    commands: [{
+      name: 'motd', aliases: ['about', 'info', 'version'], usage: '/motd',
+      help: 'Version, build + management page shortcuts',
+      run: async () => {
+        const pick = (obj, k) => (obj && obj[k] != null) ? obj[k] : '—';
+        let ver = null, st = null;
+        try {
+          ver = await (await fetch('/api/version', { cache: 'no-store' })).json();
+        } catch { /* offline-serving from the page; honest below */ }
+        try {
+          st = await (await fetch('/api/status', { cache: 'no-store' })).json();
+        } catch { /* same */ }
+        const v = (ver && ver.ok) ? `**NOVA v${ver.version}** — ${ver.codename || ''} (${ver.date || '—'})` : '**NOVA** — version endpoint unreachable';
+        const bridge = st ? (st.actionsEnabled ? '🟢 actions enabled' : '🟡 actions off (`--allow-actions`)') : '🟡 server off';
+        const os = st?.os ? ` · ${st.os}` : '';
+        return `${v}\n\n_${bridge}${os}_\n\n` +
+          `• \`/controls\` — Master Controls (features on/off)\n` +
+          `• \`/db\` — Database manager (settings, budget, usage, backup)\n` +
+          `• \`/dev\` — this build's release notes\n` +
+          `• \`/help\` — every chat command`;
+      },
+    }],
+  });
+
+  /* ── ping — server round trip + subsystem health ────────────────── */
+  registry.register({
+    id: 'ping', name: 'Ping', description: 'Round-trip latency and subsystem health.',
+    commands: [{
+      name: 'ping', aliases: ['health'], usage: '/ping',
+      help: 'Server round-trip latency + subsystem health',
+      run: async () => {
+        const t0 = performance.now();
+        try {
+          const r = await fetch('/api/health', { cache: 'no-store' });
+          const ms = Math.round(performance.now() - t0);
+          const j = await r.json();
+          const svc = j?.services || {};
+          const line = (k, v) => `• ${k}: ${v?.status || '?'}`;
+          return `**PONG** — ${ms} ms (HTTP ${r.status})\n\n`
+            + ['core', 'ollama', 'wake', 'stt', 'tts', 'vision', 'devices', 'docgen']
+                .filter(k => svc[k]).map(k => line(k, svc[k])).join('\n')
+            + `\n\n_uptime ${Math.round((j?.uptime || 0) / 60)} min_`;
+        } catch (e) {
+          return `⚠ No server: ${e.message}. Start it with \`python server/serve.py\`.`;
+        }
+      },
+    }],
+  });
+
   /* ── clock ─────────────────────────────────────────────────────── */
   registry.register({
     id: 'clock', name: 'Clock', description: 'Time, date and timers.',

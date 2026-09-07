@@ -327,26 +327,29 @@ finally:
     serve._cli_set_api("", "")
     serve._CLI_VAT = None
 
-S("PHONE COMPANION CLI (/phone hardcoded commands)")
+S("DEVICE COMMANDS — canonical /devices + /phone (one function, both UIs)")
 from server import devices  # noqa: E402
 
 try:
+    devices.set_port(8001)      # like serve.main() does at boot (pairing URLs)
     devices.reset()
+    # ── no devices ─────────────────────────────────────────────────────
+    r = devices.command("")
+    rec("canonical help lists every subcommand",
+        r["ok"] and "DEVICE COMMANDS" in r["message"] and "battery" in r["message"]
+        and "locate" in r["message"] and "open" in r["message"])
     out = "\n".join(serve._phone_cli(""))
-    rec("bare /phone prints usage + transport", "PHONE COMPANION" in out
-        and "long-poll" in out and "/phone devices" in out)
-    rec("bare /phone lists device capabilities",
-        "open_url" in out and "vibrate" in out)
+    rec("terminal /phone prints the canonical help",
+        "DEVICE COMMANDS" in out and "long-poll" in out and "battery" in out)
 
-    out = "\n".join(serve._phone_cli("devices"))
-    rec("no devices → honest hint to pair", "No devices paired" in out
-        and "/phone pair" in out)
+    r = devices.command("list")
+    rec("no devices → honest hint", "No devices paired" in r["message"]
+        and "/devices pair" in r["message"])
+    r = devices.command("battery")
+    rec("battery with no phone → honest error", not r["ok"]
+        and "No phone is paired" in r["message"])
 
-    out = "\n".join(serve._phone_cli("battery"))
-    rec("battery with no phone → honest resolve error",
-        "No phone is paired" in out)
-
-    # simulate a full pairing + heartbeat (no sockets, in-memory)
+    # ── simulate a full pairing + heartbeat (in-memory, no sockets) ────
     p = devices.start_pairing(port=8001)
     rr = devices.pair(p["code"], "Pixel Test", "android",
                       capabilities=["open_url", "show_notification", "vibrate",
@@ -354,47 +357,56 @@ try:
     did, tok = rr["deviceId"], rr["token"]
     devices.heartbeat(did, tok, {"battery": 87})
 
-    out = "\n".join(serve._phone_cli("devices"))
+    r = devices.command("list")
     rec("paired device listed with caps + connected",
-        "Pixel Test" in out and "● connected" in out and "open_url" in out
-        and did in out)
+        r["message"].count("Pixel Test") == 1 and "connected" in r["message"]
+        and "open_url" in r["message"] and did in r["message"])
+    out = "\n".join(serve._phone_cli("devices"))
+    rec("terminal /phone list agrees with canonical", "Pixel Test" in out
+        and "PAIRED DEVICES" in out)
 
-    out = "\n".join(serve._phone_cli("battery"))
-    rec("battery from heartbeat", "87%" in out and "Pixel Test" in out)
-    out = "\n".join(serve._phone_cli(f"battery {did}"))
-    rec("battery resolves by device id too", "87%" in out)
-    out = "\n".join(serve._phone_cli("caps phone"))
+    r = devices.command("battery")
+    rec("battery from heartbeat", r["ok"] and "87%" in r["message"]
+        and "Pixel Test" in r["message"])
+    r = devices.command(f"battery {did}")
+    rec("battery resolves by device id too", "87%" in r["message"])
+    r = devices.command("caps phone")
     rec("caps lists declared capabilities",
-        "can do" in out and "vibrate" in out)
+        "can do" in r["message"] and "vibrate" in r["message"])
 
-    out = "\n".join(serve._phone_cli("apps"))
+    r = devices.command("apps")
     rec("apps = hardcoded shortcut catalog",
-        "SHORTCUTS" in out and "youtube" in out and "https://m.youtube.com" in out)
+        "SHORTCUTS" in r["message"] and "youtube" in r["message"]
+        and "https://m.youtube.com" in r["message"])
     rec("apps is honest about open_url only",
-        "open_url only" in out and "native apps" in out)
+        "open_url only" in r["message"] and "native apps" in r["message"])
 
-    out = "\n".join(serve._phone_cli("open phone youtube"))
     rec("open by catalog name queues open_url",
-        "Sent “open_url”" in out and "m.youtube.com" in out)
-    out = "\n".join(serve._phone_cli(f"open {did} https://example.com"))
-    rec("open by full URL queues open_url",
-        "Sent “open_url”" in out and "example.com" in out)
-    out = "\n".join(serve._phone_cli("open phone notanapp"))
+        "Sent “open_url”" in devices.command("open phone youtube")["message"]
+        and "m.youtube.com" in devices.command("open phone youtube")["message"])
+    rec("open defaults the device to the phone",
+        "Pixel Test" in devices.command("open youtube")["message"])
+    rec("open accepts a full URL",
+        "Sent “open_url”" in devices.command(f"open {did} https://example.com")["message"])
     rec("open unknown name → honest catalog miss",
-        "not in the hardcoded catalog" in out)
+        "not in the hardcoded catalog" in devices.command("open phone notanapp")["message"])
+    rec("open with device only → usage",
+        "Usage: /devices open" in devices.command("open phone")["message"])
 
-    out = "\n".join(serve._phone_cli("notify phone Hello from terminal"))
-    rec("notify queues show_notification", "Sent “show_notification”" in out)
-    out = "\n".join(serve._phone_cli("vibrate phone 400"))
-    rec("vibrate queues with ms", "Sent “vibrate”" in out)
-    out = "\n".join(serve._phone_cli("ping phone"))
-    rec("ping queues device_status", "Sent “device_status”" in out)
-    out = "\n".join(serve._phone_cli("camera phone"))
+    rec("notify queues show_notification",
+        "Sent “show_notification”" in devices.command("notify phone Hi terminal")["message"])
+    rec("notify defaults device + free text",
+        "Pixel Test" in devices.command("notify Hello there")["message"])
+    rec("vibrate queues with ms",
+        "Sent “vibrate”" in devices.command("vibrate phone 400")["message"])
+    rec("ping queues device_status",
+        "Sent “device_status”" in devices.command("ping phone")["message"])
     rec("camera without capability → honest refusal",
-        "does not support“request_camera”".replace("“", "“") in out.replace(" ", "")
-        or "does not support" in out)
-    out = "\n".join(serve._phone_cli("open phone"))
-    rec("open without payload → usage", "Usage: /phone open" in out)
+        "does not support" in devices.command("camera phone")["message"]
+        and "request_camera" in devices.command("camera phone")["message"])
+    rec("locate uses vibrate + notify when supported",
+        "vibrate" in devices.command("locate phone")["message"]
+        and "Find me" in devices.command("locate phone")["message"])
 
     out = "\n".join(serve._phone_cli("pair"))
     rec("pair starts a code + URL", "PAIRING STARTED" in out and "Code:" in out
@@ -408,10 +420,23 @@ try:
     rec("devices empty after unpair", "No devices paired" in out)
 
     out = "\n".join(serve._phone_cli("warp"))
-    rec("unknown subcommand → honest usage", "Unknown /phone subcommand" in out
+    rec("unknown subcommand → honest usage", "Unknown device subcommand" in out
         and "battery" in out)
+
+    # ── bridge device_command = same canonical function ────────────────
+    from server import bridge as _bridge
+    devices.reset()
+    rc = _bridge.dispatch("device_command", {"sub": "help"})
+    rec("bridge device_command works (canonical)",
+        rc.get("ok") and "DEVICE COMMANDS" in rc.get("message", ""))
+    rc = _bridge.dispatch("device_command", {"sub": "battery"})
+    rec("bridge battery with no phone is honest",
+        not rc.get("ok") and "No phone is paired" in rc.get("message", ""))
+    rc = _bridge.dispatch("device_apps", {})
+    rec("bridge device_apps returns the shared catalog",
+        rc.get("ok") and any(a["name"] == "youtube" for a in rc.get("apps", [])))
 except Exception as e:
-    rec("phone cli section ran", False, str(e))
+    rec("device commands section ran", False, str(e))
 
 print(f"\n{'─'*56}\n  PASS {P}\tFAIL {F}")
 sys.exit(1 if F else 0)

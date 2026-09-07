@@ -412,12 +412,18 @@ export function registerScreenPlugin(registry, ctx) {
       },
 
       {
-        name: 'devices', aliases: ['device'], usage: '/devices [pair|list]',
-        help: 'Pair and inspect companion devices (phone)',
+        name: 'devices', aliases: ['device'],
+        usage: '/devices [pair|list|battery|apps|open|notify|vibrate|locate|ping|caps|unpair|help]',
+        help: 'Pair and control companion devices (phone): list, battery, apps, open, notify, locate…',
         run: async (args, c) => {
           const A = c.ui?.actions;
           if (!A?.available) return '⚠ No action bridge. Restart with `--allow-actions`.';
-          const sub = (args || 'list').trim().toLowerCase();
+          const parts = (args || '').trim().split(/\s+/);
+          const sub = (parts.shift() || 'list').toLowerCase();
+          const rest = parts.join(' ').trim();
+          // pair + list keep their rich chat formatting; every other
+          // subcommand runs the SAME canonical device command as the
+          // terminal /phone (devices.command) — one function, never forked.
           if (sub === 'pair') {
             const r = await A.devicePairStart();
             return r.ok
@@ -426,20 +432,24 @@ export function registerScreenPlugin(registry, ctx) {
                 + `Valid for 3 minutes.`
               : `⚠ ${r.message}`;
           }
-          const st = await A.deviceList();
-          if (!st.devices?.length) {
-            return '**No devices paired.**\n\nRun `/devices pair`, then open '
-              + '`/phone` on the handset over your LAN.\n\n'
-              + `_Transport: ${st.transportNote || ''}_`;
+          if (sub === 'list' || sub === 'device' || sub === 'status') {
+            const st = await A.deviceList();
+            if (!st.devices?.length) {
+              return '**No devices paired.**\n\nRun `/devices pair`, then open '
+                + '`/phone` on the handset over your LAN.\n\n'
+                + `_Transport: ${st.transportNote || ''}_`;
+            }
+            return `**PAIRED DEVICES** (${st.connected}/${st.count} connected)\n\n`
+              + st.devices.map(d =>
+                `${d.status === 'connected' ? '🟢' : '⚪'} **${d.name}** \`${d.id}\`\n`
+                + `   ${d.platform} · ${d.capabilities.join(', ') || 'no capabilities'}\n`
+                + `   ${d.latencyMs != null ? `${d.latencyMs}ms · ` : ''}`
+                + `${d.battery != null ? `battery ${d.battery}% · ` : ''}`
+                + `${d.actionsAcked}/${d.actionsSent} actions acked`).join('\n\n')
+              + `\n\n_Try: "/devices open youtube" or "open youtube on my phone"_`;
           }
-          return `**PAIRED DEVICES** (${st.connected}/${st.count} connected)\n\n`
-            + st.devices.map(d =>
-              `${d.status === 'connected' ? '🟢' : '⚪'} **${d.name}** \`${d.id}\`\n`
-              + `   ${d.platform} · ${d.capabilities.join(', ') || 'no capabilities'}\n`
-              + `   ${d.latencyMs != null ? `${d.latencyMs}ms · ` : ''}`
-              + `${d.battery != null ? `battery ${d.battery}% · ` : ''}`
-              + `${d.actionsAcked}/${d.actionsSent} actions acked`).join('\n\n')
-            + `\n\n_Try: "open youtube on my phone"_`;
+          const r = await A.deviceCommand(sub, rest);
+          return r?.ok ? r.message : `⚠ ${r?.message || 'Device command failed.'}`;
         },
       },
 

@@ -156,6 +156,7 @@ export class LocalActions {
   /* ── paired devices ───────────────────────────────────────────────────── */
   deviceList() { return this.run('device_list', {}); }
   deviceSend(device, action, params) { return this.run('device_send', { device, action, params }); }
+  deviceCommand(sub, arg = '') { return this.run('device_command', { sub, arg }); }
   devicePairStart() { return this.run('device_pair_start', {}); }
   devicePairCancel() { return this.run('device_pair_cancel', {}); }
   deviceUnpair(deviceId) { return this.run('device_unpair', { deviceId }); }
