@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURA · Image Production Test (temporary)</title>
+<style>
+  :root { --bg:#0a0e16; --panel:#101724; --brd:rgba(148,175,205,.16);
+          --text:#e8eef5; --dim:#7d8da3; --acc:#38bdf8; --ok:#34d399;
+          --warn:#ffc43c; --err:#ff5470; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 "Segoe UI",system-ui,sans-serif; padding:20px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:12px; margin-bottom:14px; }
+  .card { background:var(--panel); border:1px solid var(--brd); border-radius:10px;
+          padding:14px; margin-bottom:14px; max-width:860px; }
+  label { display:block; font-size:12px; color:var(--dim); margin:10px 0 4px;
+          letter-spacing:.04em; }
+  input, select, textarea { background:#0b1220; color:var(--text);
+        border:1px solid var(--brd); border-radius:6px; padding:8px 10px;
+        font:inherit; width:100%; }
+  textarea { min-height:70px; resize:vertical; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .row > div { flex:1 1 200px; }
+  button { background:var(--acc); color:#07101a; border:0; border-radius:6px;
+           padding:9px 16px; font-weight:700; cursor:pointer; margin-top:12px; }
+  button.ghost { background:transparent; color:var(--dim); border:1px solid var(--brd); }
+  button:disabled { opacity:.5; cursor:wait; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:12px;
+         border:1px solid var(--brd); }
+  .tag.ok { color:var(--ok); border-color:rgba(52,211,153,.4); }
+  .tag.warn { color:var(--warn); border-color:rgba(255,196,60,.4); }
+  pre { background:#070b12; border:1px solid var(--brd); border-radius:8px;
+        padding:10px; overflow:auto; max-height:340px; white-space:pre-wrap;
+        word-break:break-word; font-size:12px; }
+  pre.ok { border-color:rgba(52,211,153,.4); }
+  pre.err { border-color:rgba(255,84,112,.5); }
+  .muted { color:var(--dim); font-size:12px; }
+  a { color:var(--acc); }
+  .spin { display:inline-block; animation:sp 1s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg);} }
+</style>
+</head>
+<body>
+<h1>🖼 AURA · Image Production Test <span class="muted">temporary dev UI</span></h1>
+<div class="sub">Test image generation SEPARATELY from the PPT pipeline — pick a provider/model,
+  save its IMAGES-ONLY key, and run a direct generate or a full single-slide deck test.
+  <b>It is NOT part of the user app.</b></div>
+
+<div class="card">
+  <h2 style="margin-top:0">1 · Provider &amp; key</h2>
+  <div id="keyStatus" class="muted">loading providers…</div>
+  <div class="row">
+    <div><label>Provider</label><select id="provider"></select></div>
+    <div><label>Model</label><select id="model"></select></div>
+    <div><label>Style</label><select id="style">
+      <option value="flat illustration">flat illustration</option>
+      <option value="photorealistic">photorealistic</option>
+      <option value="3d render">3d render</option>
+      <option value="watercolor">watercolor</option>
+      <option value="line art">line art</option>
+      <option value="holiday">holiday</option>
+    </select></div>
+  </div>
+  <div class="row">
+    <div><label>IMAGES-ONLY key (this slot is used ONLY for image calls)</label>
+      <input id="imageKey" type="password" autocomplete="off"
+             placeholder="paste the image key…"></div>
+  </div>
+  <button id="saveKey">SAVE KEY → VAULT</button>
+  <div class="muted" id="keyMsg" style="margin-top:6px"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">2 · Prompt</h2>
+  <label>Prompt</label>
+  <textarea id="prompt">Educational flat illustration of the solar system, planets in orbit around the sun</textarea>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">3 · Run</h2>
+  <div class="row">
+    <button id="runDirect">⚡ GENERATE IMAGE (direct)</button>
+    <button id="runDeck" class="ghost">📊 TEST IN A DECK (single slide)</button>
+  </div>
+  <label style="margin-top:10px"><input id="aiFirst" type="checkbox"> Force AI generation
+    (off = Smart: search first, generate only when needed)</label>
+  <div id="result"><pre class="muted" id="out">results will appear here…</pre></div>
+</div>
+
+<div class="sub">Links: <a href="/db">Database manager (/db)</a> · <a href="/">AURA</a>
+  · this is a temporary test harness and may be removed later.</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let TOKEN = "";
+let PROVIDERS = [];
+const keyIdOf = (ip) => ip.keyId || ip.id;
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, { ...opts,
+    headers: { "Content-Type": "application/json", "X-AURA-Token": TOKEN, ...(opts.headers || {}) } });
+  return r.json().catch(() => ({ ok: false, message: `HTTP ${r.status}` }));
+};
+
+async function boot() {
+  try { TOKEN = (await api("/api/token")).token || ""; } catch {}
+  const caps = await api("/api/action", { method: "POST",
+    body: JSON.stringify({ action: "doc_capabilities", params: {} }) });
+  PROVIDERS = caps.images || [];
+  const provSel = $("provider");
+  provSel.innerHTML = PROVIDERS.map((p, i) =>
+    `<option value="${i}">${p.label} (${p.keyId || p.id})</option>`).join("");
+  provSel.onchange = () => { fillModels(); refreshKeyStatus(); };
+  fillModels(); refreshKeyStatus();
+  $("saveKey").onclick = saveKey;
+  $("runDirect").onclick = runDirect;
+  $("runDeck").onclick = runDeck;
+  $("runDirect").disabled = $("runDeck").disabled = false;
+}
+
+function fillModels() {
+  const p = PROVIDERS[+$("provider").value] || {};
+  const m = p.models || [{ id: p.model, label: p.label }];
+  $("model").innerHTML = m.map((x) =>
+    `<option value="${x.id}">${x.label}${x.id !== x.label ? " (" + x.id + ")" : ""}</option>`).join("");
+}
+
+async function refreshKeyStatus() {
+  const p = PROVIDERS[+$("provider").value] || {};
+  const slot = keyIdOf(p);
+  const s = await api("/api/db/vault");
+  const meta = (s.providers || {})[slot];
+  $("keyStatus").innerHTML = p.note
+    ? `<span class="muted">${p.note}</span><br>` : "";
+  $("keyStatus").innerHTML += `vault slot <code>${slot}</code>: ` +
+    (meta?.hasKey
+      ? `<span class="tag ok">✓ SET</span> <span class="muted">${meta.preview || ""}</span>`
+      : `<span class="tag warn">✗ NO KEY — add one below (or Settings → KEYS &amp; SPEND)</span>`);
+  $("imageKey").placeholder = meta?.hasKey ? `replace ${slot} key…` : `paste ${slot} key…`;
+}
+
+async function saveKey() {
+  const p = PROVIDERS[+$("provider").value] || {};
+  const v = $("imageKey").value.trim();
+  if (!v) { $("keyMsg").textContent = "Paste a key first — no empty saves."; return; }
+  const r = await api("/api/db/vault", { method: "POST",
+    body: JSON.stringify({ provider: keyIdOf(p), key: v }) });
+  $("keyMsg").textContent = r.ok ? `✓ saved under '${keyIdOf(p)}' (encrypted vault)`
+                                 : "✗ " + (r.message || "failed");
+  $("keyMsg").className = "muted";
+  $("imageKey").value = "";
+  refreshKeyStatus();
+}
+
+async function runDirect() {
+  $("runDirect").disabled = true;
+  const p = PROVIDERS[+$("provider").value] || {};
+  const r = await api("/api/action", { method: "POST", body: JSON.stringify({
+    action: "image_test",
+    params: { prompt: $("prompt").value, provider: p.id,
+              model: $("model").value || p.model,
+              style: $("style").value,
+              outdir: "~/Documents/AURA/image-test" } }) });
+  showResult(r);
+  $("runDirect").disabled = false;
+}
+
+async function runDeck() {
+  $("runDeck").disabled = true;
+  const p = PROVIDERS[+$("provider").value] || {};
+  const forceAi = $("aiFirst").checked;
+  const slide = { kind: "image", title: "Test visual", purpose: "test image production" };
+  if (forceAi) slide.image = "@gen:" + $("style").value;
+  else slide.visual = { required: true, type: "photo",
+                        search_query: $("prompt").value };
+  const r = await api("/api/action", { method: "POST", body: JSON.stringify({
+    action: "doc_build",
+    params: { kind: "pptx", folder: "~/Documents/AURA/image-test",
+      spec: { title: "Image Test", slides: [
+        { kind: "title", title: "Image Test", bullets: [] }, slide] },
+      options: { theme: "professional-dark", transition: "fade", speed: "med",
+        animation: "none",
+        images: { enabled: true, count: 1, style: $("style").value,
+                  provider: p.id, model: $("model").value || p.model,
+                  mode: forceAi ? "ai" : "smart",
+                  sourcePreference: "auto" } } }) }));
+  showResult(r);
+  $("runDeck").disabled = false;
+}
+
+function showResult(r) {
+  const pre = $("out");
+  pre.className = r.ok ? "ok" : "err";
+  pre.textContent = JSON.stringify(r, null, 2);
+  if (!r.ok && r.message) pre.textContent += "\n\n" + r.message;
+  if (r.images) pre.textContent += "\n\nimage sources: " +
+    JSON.stringify(r.images.sources || {}) + "\nnative: " +
+    JSON.stringify(r.images.native || []) + "\nfailed: " +
+    JSON.stringify(r.images.failed || []);
+}
+boot().catch((e) => { $("keyStatus").innerHTML = `<span class="tag err">boot failed: ${e.message}</span>`; });
+</script>
+</body>
+</html>

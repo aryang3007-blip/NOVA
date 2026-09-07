@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURA · Database Manager</title>
+<style>
+  :root { --bg:#0a0e16; --panel:#101724; --brd:rgba(148,175,205,.16);
+          --text:#e8eef5; --dim:#7d8da3; --acc:#38bdf8; --ok:#34d399;
+          --warn:#ffc43c; --err:#ff5470; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 "Segoe UI",system-ui,sans-serif; padding:20px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:14px; letter-spacing:.08em; text-transform:uppercase;
+       color:var(--acc); margin:26px 0 10px; }
+  .sub { color:var(--dim); font-size:12px; margin-bottom:14px; }
+  .card { background:var(--panel); border:1px solid var(--brd); border-radius:10px;
+          padding:14px; margin-bottom:14px; }
+  .kv { display:grid; grid-template-columns:170px 1fr; gap:6px 12px; font-size:13px; }
+  .kv b { color:var(--dim); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--brd);
+           vertical-align:top; }
+  th { color:var(--dim); font-weight:600; }
+  code, pre { font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+  pre { margin:4px 0; white-space:pre-wrap; word-break:break-word; color:#cfe3ff; }
+  input, textarea, select { background:#0b1220; color:var(--text); border:1px solid var(--brd);
+        border-radius:6px; padding:7px 9px; font:inherit; width:100%; }
+  textarea { min-height:66px; resize:vertical; }
+  .row { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
+  .row > * { flex:0 1 auto; }
+  .row .grow { flex:1 1 220px; }
+  button { background:var(--acc); color:#07101a; border:0; border-radius:6px;
+           padding:8px 14px; font-weight:700; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--dim); border:1px solid var(--brd); }
+  button.danger { background:var(--err); color:#fff; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:12px;
+         border:1px solid var(--brd); }
+  .tag.ok { color:var(--ok); border-color:rgba(52,211,153,.4); }
+  .tag.warn { color:var(--warn); border-color:rgba(255,196,60,.4); }
+  .tag.err { color:var(--err); border-color:rgba(255,220,240,.4); }
+  .msg { font-size:12.5px; margin-top:8px; min-height:18px; }
+  .msg.ok { color:var(--ok); } .msg.err { color:var(--err); }
+  a { color:var(--acc); }
+  .muted { color:var(--dim); font-size:12px; }
+  .settings-row { border:1px solid var(--brd); border-radius:8px; padding:10px;
+                  margin-bottom:10px; background:#0c1322; }
+</style>
+</head>
+<body>
+<h1>🗄 AURA · Database Manager <span class="muted">(/db)</span></h1>
+<div class="sub">Inspect and change database values &amp; data (settings, budget, usage, backup/restore).
+  No raw SQL — every change is a safe, domain-level operation.</div>
+
+<div class="card" id="statusCard"><h2>Status</h2><div id="status" class="kv">…</div></div>
+
+<div class="card"><h2>Tables</h2><div id="tables"><span class="muted">loading…</span></div></div>
+
+<div class="card"><h2>Settings (key → JSON value)</h2>
+  <div id="settings"></div>
+  <div class="row" style="margin-top:10px">
+    <input class="grow" id="newKey" placeholder="new key (e.g. docFolder)">
+    <textarea class="grow" id="newVal" placeholder='JSON value (e.g. "~/Documents/AURA")'></textarea>
+    <button id="addSetting">ADD / SAVE</button>
+  </div>
+</div>
+
+<div class="card"><h2>Spend budget</h2>
+  <div class="row">
+    <label class="grow">Requests / day <input id="bReq" type="number" min="0"></label>
+    <label class="grow">Images / day <input id="bImg" type="number" min="0"></label>
+    <label class="grow">Sec between images <input id="bPace" type="number" min="0"></label>
+    <label class="grow">Enabled <select id="bEn"><option value="1">on</option><option value="0">off</option></select></label>
+    <button id="saveBudget">SAVE BUDGET</button>
+  </div>
+  <div class="msg" id="budgetMsg"></div>
+</div>
+
+<div class="card"><h2>Usage ledger</h2>
+  <div class="row" style="margin-bottom:8px">
+    <button id="refreshUsage">REFRESH</button>
+    <button class="danger" id="clearUsage">CLEAR LOG</button>
+    <span class="muted">who was called, when, and whether it worked — no secrets</span>
+  </div>
+  <div id="usage" class="muted">loading…</div>
+</div>
+
+<div class="card"><h2>Backup / restore</h2>
+  <div class="row">
+    <button id="backup">CREATE BACKUP</button>
+    <input class="grow" id="restorePath" placeholder="backup file path to restore">
+    <button class="danger" id="restore">RESTORE (replaces current DB)</button>
+  </div>
+  <div class="msg" id="backupMsg"></div>
+</div>
+
+<div class="card"><h2>Vault slots</h2>
+  <div id="vault" class="muted">loading…</div>
+  <div class="muted" style="margin-top:6px">Keys are encrypted; only existence + preview are shown.
+  Add/change keys in Settings → KEYS &amp; SPEND or the PPT Builder.</div>
+</div>
+
+<div class="sub" style="margin-top:18px">Links: <a href="/">AURA</a> ·
+  <a href="/dev/image-test.html">Image production test UI</a> ·
+  <a href="/dev">release notes</a></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let TOKEN = "";
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", "X-AURA-Token": TOKEN, ...(opts.headers || {}) },
+  });
+  return r.json().catch(() => ({ ok: false, message: `HTTP ${r.status}` }));
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (v) => { try { return JSON.stringify(v, null, 2); } catch { return String(v); } };
+
+async function boot() {
+  try { TOKEN = (await api("/api/token")).token || ""; } catch {}
+  await refreshStatus(); await refreshSchema(); await refreshSettings();
+  await refreshBudget(); await refreshUsage(); await refreshVault();
+}
+
+async function refreshStatus() {
+  const s = await api("/api/db/status");
+  const d = s.db || {};
+  $("status").innerHTML =
+    `<b>Path</b><code>${esc(d.path)}</code>` +
+    `<b>Schema</b><span>v${esc(d.version)} · integrity: <span class="tag ${d.integrity === "ok" ? "ok" : "warn"}">${esc(d.integrity)}</span></span>` +
+    `<b>Size</b><span>${((d.sizeBytes || 0) / 1024).toFixed(1)} KB</span>` +
+    `<b>Vault slots</b><span>${Object.keys(s.vault || {}).join(", ") || "none"}</span>`;
+}
+
+async function refreshSchema() {
+  const s = await api("/api/db/schema");
+  const tables = s.tables || [];
+  const rows = await Promise.all(tables.map(async (t) => {
+    return `<tr><td><b>${esc(t.name)}</b><div class="muted">${
+      (t.columns || []).map((c) => esc(c.name) + " " + esc(c.type)).join(" · ")}</div></td>
+      <td>${t.rowCount}</td></tr>`;
+  }));
+  $("tables").innerHTML = tables.length
+    ? `<table><tr><th>table · columns</th><th>rows</th></tr>${rows.join("")}</table>`
+    : `<span class="muted">no tables</span>`;
+}
+
+async function refreshSettings() {
+  const s = await api("/api/db/settings");
+  const map = s.settings || {};
+  const box = $("settings");
+  box.innerHTML = "";
+  const keys = Object.keys(map).sort();
+  if (!keys.length) { box.innerHTML = '<span class="muted">empty — add one below</span>'; return; }
+  for (const k of keys) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    const head = document.createElement("div");
+    head.innerHTML = `<b>${esc(k)}</b>`;
+    const ta = document.createElement("textarea");
+    ta.value = fmt(map[k]);
+    const btnRow = document.createElement("div");
+    btnRow.className = "row";
+    const save = document.createElement("button"); save.textContent = "SAVE";
+    const del = document.createElement("button"); del.textContent = "REMOVE"; del.className = "ghost";
+    const msg = document.createElement("div"); msg.className = "msg muted";
+    save.onclick = async () => {
+      save.disabled = true;
+      const r = await api("/api/db/settings", { method: "POST",
+        body: JSON.stringify({ key: k, value: ta.value }) });
+      msg.textContent = r.ok ? "✓ saved" : "✗ " + (r.message || "failed");
+      msg.className = "msg " + (r.ok ? "ok" : "err");
+      save.disabled = false;
+    };
+    del.onclick = async () => {
+      if (!confirm(`Remove settings key '${k}'?`)) return;
+      await api(`/api/db/settings?key=${encodeURIComponent(k)}`, { method: "DELETE" });
+      await refreshSettings();
+    };
+    btnRow.append(save, del, msg);
+    row.append(head, ta, btnRow);
+    box.append(row);
+  }
+}
+
+$("addSetting").onclick = async () => {
+  const k = $("newKey").value.trim(), v = $("newVal").value;
+  if (!k) { alert("Enter a key."); return; }
+  const r = await api("/api/db/settings", { method: "POST",
+    body: JSON.stringify({ key: k, value: v }) });
+  if (r.ok) { $("newKey").value = ""; $("newVal").value = ""; await refreshSettings(); }
+  else alert(r.message || "save failed");
+};
+
+async function refreshBudget() {
+  const s = await api("/api/db/usage/budget");
+  const b = s.budget || {};
+  $("bReq").value = b.requestsPerDay ?? 0;
+  $("bImg").value = b.imagesPerDay ?? 0;
+  $("bPace").value = b.imageIntervalSec ?? 5;
+  $("bEn").value = b.enabled ? "1" : "0";
+}
+$("saveBudget").onclick = async () => {
+  const r = await api("/api/db/usage/budget", { method: "POST", body: JSON.stringify({
+    enabled: $("bEn").value === "1",
+    requestsPerDay: Math.max(0, parseInt($("bReq").value, 10) || 0),
+    imagesPerDay: Math.max(0, parseInt($("bImg").value, 10) || 0),
+    imageIntervalSec: Math.max(0, parseInt($("bPace").value, 10) || 0),
+  })});
+  $("budgetMsg").textContent = r.ok ? "✓ budget saved — enforced from the next call"
+                                    : "✗ " + (r.message || "failed");
+  $("budgetMsg").className = "msg " + (r.ok ? "ok" : "err");
+};
+
+async function refreshUsage() {
+  const s = await api("/api/db/usage?limit=50");
+  const rows = s.log || [];
+  $("usage").innerHTML = rows.length
+    ? `<table><tr><th>when</th><th>provider</th><th>model</th><th>kind</th><th>status</th><th>detail</th></tr>` +
+      rows.map((r) => `<tr><td>${new Date(r.ts * 1000).toLocaleTimeString()}</td>
+        <td>${esc(r.provider)}</td><td><code>${esc(r.model)}</code></td>
+        <td>${esc(r.kind)}</td><td><span class="tag ${r.status === "ok" ? "ok" : r.status === "blocked" ? "warn" : "err"}">${esc(r.status)}</span></td>
+        <td class="muted">${esc((r.detail || "").slice(0, 90))}</td></tr>`).join("") + "</table>"
+    : '<span class="muted">no usage recorded yet</span>';
+}
+$("refreshUsage").onclick = refreshUsage;
+$("clearUsage").onclick = async () => {
+  if (!confirm("Clear the whole usage ledger?")) return;
+  const r = await api("/api/db/usage", { method: "DELETE" });
+  $("usage").textContent = r.message || "cleared";
+  await refreshUsage();
+};
+
+$("backup").onclick = async () => {
+  $("backup").disabled = true;
+  const r = await api("/api/db/backup", { method: "POST", body: "{}" });
+  $("backupMsg").textContent = r.ok ? "✓ backup: " + r.path : "✗ " + (r.message || "failed");
+  $("backupMsg").className = "msg " + (r.ok ? "ok" : "err");
+  $("backup").disabled = false;
+};
+$("restore").onclick = async () => {
+  const path = $("restorePath").value.trim();
+  if (!path) { alert("Enter a backup file path."); return; }
+  if (!confirm("Restore replaces the current database (a pre-restore backup is made automatically). Continue?")) return;
+  const r = await api("/api/db/restore", { method: "POST", body: JSON.stringify({ path }) });
+  $("backupMsg").textContent = r.ok
+    ? `✓ restored from ${r.path} — pre-restore backup: ${r.preRestoreBackup}`
+    : "✗ " + (r.message || "failed");
+  $("backupMsg").className = "msg " + (r.ok ? "ok" : "err");
+  if (r.ok) { await refreshStatus(); await refreshSchema(); await refreshSettings(); await refreshBudget(); await refreshUsage(); }
+};
+
+async function refreshVault() {
+  const s = await api("/api/db/vault");
+  const provs = s.providers || {};
+  const keys = Object.keys(provs);
+  $("vault").innerHTML = keys.length
+    ? `<table><tr><th>slot</th><th>state</th><th>preview</th></tr>` +
+      keys.map((k) => `<tr><td><code>${esc(k)}</code></td>
+        <td><span class="tag ok">SET</span></td>
+        <td class="muted">${esc(provs[k]?.preview || "••••")}</td></tr>`).join("") + "</table>"
+    : '<span class="muted">no keys stored in the vault</span>';
+}
+
+boot().catch((e) => { $("status").innerHTML = `<span class="tag err">boot failed: ${esc(e.message)}</span>`; });
+</script>
+</body>
+</html>

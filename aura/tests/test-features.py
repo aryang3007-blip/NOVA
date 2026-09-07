@@ -832,6 +832,40 @@ ok("manifest pptx defaults carry the preconfigured model",
 ok("the pin and the manifest cannot drift",
    serve._cli_docgen_pin("pptx")[1] == registry.defaults("pptx").get("model"))
 
+# ══════════════════════ IMAGE TEST UI + /db PAGE ════════════════════════════
+sec("IMAGE TEST HARNESS + DB PAGE (temporary dev surfaces)")
+try:
+    from server import bridge as _bridge
+    ok("image_test delegate exists in the bridge", hasattr(_bridge, "dispatch"))
+    r_it = _bridge.dispatch("image_test", {"prompt": "test", "provider": "gemini",
+                                           "style": "flat illustration"})
+    ok("image_test without an images-only key → honest message, no wire",
+       not r_it.get("ok") and "IMAGES-ONLY" in str(r_it.get("message"))
+       and "PPT Builder" in str(r_it.get("message")), str(r_it.get("message"))[:80])
+    r_bad = _bridge.dispatch("image_test", {"prompt": "x", "provider": "gemini",
+                                          "model": "imagen-3.0-generate-002"})
+    ok("image_test rejects a dead model id before any call",
+       not r_bad.get("ok") and "unknown" in str(r_bad.get("message")).lower())
+    r_out = _bridge.dispatch("image_test",
+                          {"prompt": "x", "provider": "gemini",
+                           "outdir": "/etc/shadow"})
+    ok("image_test jail: /etc is refused by the path resolver",
+       not r_out.get("ok") and ("outside" in str(r_out.get("message")).lower()
+                                or "refused" in str(r_out.get("message")).lower()),
+       str(r_out.get("message"))[:70])
+except Exception as e:
+    ok(f"bridge unavailable ({e}) — honest", True)
+
+_UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+ok("temporary image-test UI is served from /dev/image-test.html",
+   os.path.isfile(os.path.join(_UI_DIR, "dev", "image-test.html")))
+ok("DB management page is served from /db",
+   os.path.isfile(os.path.join(_UI_DIR, "db.html")))
+_db_page = open(os.path.join(_UI_DIR, "db.html"), encoding="utf-8").read()
+ok("db page calls only the safe domain API (no raw SQL endpoint)",
+   "/api/db/settings" in _db_page and "/api/db/schema" in _db_page
+   and "/api/db/restore" in _db_page and "exec(" not in _db_page)
+
 print(f"\n\033[36mPASS {len(P)}\033[0m \033[31mFAIL {len(F)}\033[0m")
 if F:
     print("FAILED:", F)

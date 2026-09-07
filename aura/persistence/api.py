@@ -6,6 +6,7 @@ Zero raw SQL exposed over HTTP. Clean semantic domain operations.
 """
 
 import json
+import os
 import time
 from urllib.parse import urlparse, parse_qs
 from typing import Tuple, Dict, Any, Optional
@@ -19,6 +20,26 @@ from .repositories import (
 from .importer import import_client_storage
 
 
+_SETTINGS_KEY_RE = __import__("re").compile(r"^[A-Za-z0-9._\-]{1,128}$")
+
+
+def _schema():
+    """Read-only table introspection for the /db page — NEVER raw SQL from the
+    browser; only table/column names and row counts are exposed."""
+    conn = db_manager.get_connection()
+    tables = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+    out = []
+    for t in tables:
+        # names come from sqlite_master (our migrations) — quote defensively.
+        q = '"' + str(t).replace('"', '""') + '"'
+        cols = [{"name": c[1], "type": c[2]} for c in conn.execute(f"PRAGMA table_info({q})")]
+        n = conn.execute(f"SELECT COUNT(*) FROM {q}").fetchone()[0]
+        out.append({"name": t, "rowCount": n, "columns": cols})
+    return out
+
+
 class PersistenceAPIHandler:
     @staticmethod
     def handle_get(path: str, query_params: Dict[str, list]) -> Tuple[Dict[str, Any], int]:
@@ -26,11 +47,19 @@ class PersistenceAPIHandler:
         q = {k: v[0] if v else "" for k, v in query_params.items()}
 
         if sub == "status":
+            init = db_manager.initialize()
+            size = 0
+            try:
+                size = os.path.getsize(db_manager.db_path)
+            except Exception:
+                pass
             return {
                 "ok": True,
                 "db": {
                     "path": str(db_manager.db_path),
-                    "version": db_manager.initialize().get("version", 0),
+                    "version": init.get("version", 0),
+                    "integrity": init.get("integrity", "unknown"),
+                    "sizeBytes": size,
                     "isLocal": True,
                     "offlineMode": True
                 },
@@ -39,6 +68,12 @@ class PersistenceAPIHandler:
 
         if sub == "config":
             return {"ok": True, "config": config_repo.get("aura.config.v1", {})}, 200
+
+        if sub == "settings":
+            return {"ok": True, "settings": config_repo.get_all()}, 200
+
+        if sub == "schema":
+            return {"ok": True, "tables": _schema()}, 200
 
         if sub == "memory/conversation":
             session_id = q.get("session") or None
@@ -124,6 +159,43 @@ class PersistenceAPIHandler:
     @staticmethod
     def handle_post(path: str, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         sub = path[len("/api/db/"):].rstrip("/")
+
+        if sub == "settings":
+            key = str(payload.get("key") or "").strip()
+            if not _SETTINGS_KEY_RE.match(key):
+                return {"ok": False,
+                        "message": "Invalid settings key (letters, digits, dot, dash, underscore only)."}, 400
+            value = payload.get("value")
+            # strings that LOOK like JSON stay as the UI sent them; anything
+            # else is stored as-is (config_repo json-encodes it safely).
+            if isinstance(value, str):
+                s = value.strip()
+                if s[:1] in ("{", "[", '"') or s in ("true", "false", "null") \
+                        or s.lstrip("-").isdigit():
+                    try:
+                        import json as _json
+                        value = _json.loads(s)
+                    except Exception:
+                        pass
+            config_repo.set(key, value)
+            return {"ok": True, "key": key, "value": config_repo.get(key)}, 200
+
+        if sub == "restore":
+            src = str(payload.get("path") or "").strip()
+            if not src:
+                return {"ok": False, "message": "Backup path is required."}, 400
+            try:
+                from pathlib import Path as _P
+                src_p = _P(src)
+                if not src_p.is_file():
+                    return {"ok": False, "message": f"No such backup file: {src}"}, 404
+                # Safety: snapshot the CURRENT db before overwriting it.
+                pre = db_manager.backup()
+                ok = db_manager.restore(src_p)
+                return {"ok": ok, "path": str(src_p),
+                        "preRestoreBackup": str(pre)}, 200
+            except Exception as e:
+                return {"ok": False, "message": f"Restore failed: {e}"}, 500
 
         if sub == "config":
             cfg = payload.get("config") if "config" in payload else payload
@@ -304,6 +376,13 @@ class PersistenceAPIHandler:
         sub = path[len("/api/db/"):].rstrip("/")
         q = {k: v[0] if v else "" for k, v in query_params.items()}
         p = payload or {}
+
+        if sub == "settings":
+            key = str(q.get("key") or p.get("key") or "").strip()
+            if not key:
+                return {"ok": False, "message": "Key is required."}, 400
+            existed = config_repo.delete(key)
+            return {"ok": True, "deleted": existed, "key": key}, 200
 
         if sub == "memory/conversation":
             mid = q.get("id") or p.get("id")

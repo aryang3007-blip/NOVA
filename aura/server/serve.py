@@ -293,6 +293,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._json({"ok": False, "message": "Bad token."}, 401)
             return self._json(devices.status())
 
+        # ── /db — database management page (settings values, tables, budget,
+        #    usage, backup/restore). Same-origin local admin page.
+        if path in ("/db", "/db/"):
+            try:
+                with open(os.path.join(ROOT, "db.html"), "rb") as f:
+                    body = f.read()
+            except Exception as e:
+                return self._json({"ok": False, "message": f"db page missing: {e}"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # ── /dev — version + release notes, served as a real page.
         if path in ("/dev", "/dev/"):
             try:

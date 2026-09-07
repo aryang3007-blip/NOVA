@@ -1260,6 +1260,28 @@ def dispatch(action, params):
     # renders it — same function for the app, the terminal and the tests.
     # Options carry the feature knobs (theme/transition/animation/images),
     # and the jail resolver is injected so there is exactly one path rule.
+    if action == "image_test":
+        # dev/test harness: generate ONE image straight through the canonical
+        # images.generate (strict images-only key, budget, pacing, 429 retry)
+        # so the provider can be validated WITHOUT building a full deck.
+        try:
+            from services.docgen import images as images_mod
+        except Exception as e:
+            return {"ok": False, "message": f"image module unavailable: {e}"}
+        outdir = p.get("outdir")
+        if outdir:
+            outdir, err = _resolve_path(outdir or "~/Documents/AURA/image-test",
+                                        must_exist=False)
+            if err:
+                return {"ok": False, "message": err}
+        return images_mod.generate(
+            str(p.get("prompt") or "").strip() or "test image",
+            style=str(p.get("style") or "flat illustration"),
+            provider=str(p.get("provider") or "gemini"),
+            outdir=outdir,
+            model=str(p.get("model") or "").strip() or None,
+            min_interval=p.get("minInterval"))
+
     if action.startswith("doc_"):
         try:
             from services.docgen import service as docgen_service

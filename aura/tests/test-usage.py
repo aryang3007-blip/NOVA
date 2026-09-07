@@ -100,6 +100,37 @@ rec("DELETE usage clears the ledger", code == 200 and usage_repo.summary()["tota
 rec("budget survives the clear (it is a setting, not a log row)",
     usage_repo.get_budget()["imagesPerDay"] == 2)
 
+S("DB PAGE API — settings editor, schema, status")
+d, code = api.PersistenceAPIHandler.handle_get("/api/db/status", {})
+rec("GET status exposes path/version/integrity/size for the /db page",
+    code == 200 and d["db"]["path"] and d["db"]["version"] >= 5
+    and d["db"]["integrity"] == "ok" and d["db"]["sizeBytes"] > 0,
+    str(d.get("db"))[:120])
+d, code = api.PersistenceAPIHandler.handle_post("/api/db/settings", {
+    "key": "docFolder", "value": "~/Documents/AURA"})
+rec("POST settings stores a value (JSON-safe)",
+    code == 200 and d["value"] == "~/Documents/AURA", str(d))
+d, code = api.PersistenceAPIHandler.handle_post("/api/db/settings", {
+    "key": "usage.budget", "value": "{\"enabled\": true, \"requestsPerDay\": 9}"})
+rec("POST settings accepts JSON-looking strings",
+    code == 200 and d["value"]["requestsPerDay"] == 9, str(d))
+d, code = api.PersistenceAPIHandler.handle_post("/api/db/settings", {
+    "key": "bad key ; DROP", "value": "x"})
+rec("settings keys are validated — no raw-SQL injection path",
+    code == 400 and not d["ok"])
+d, code = api.PersistenceAPIHandler.handle_get("/api/db/settings", {})
+rec("GET settings returns all rows",
+    code == 200 and d["settings"]["docFolder"] == "~/Documents/AURA")
+d, code = api.PersistenceAPIHandler.handle_delete("/api/db/settings", {"key": ["docFolder"]}, {})
+rec("DELETE settings removes one key",
+    code == 200 and d["deleted"] is True)
+d, code = api.PersistenceAPIHandler.handle_get("/api/db/schema", {})
+names = [t["name"] for t in d.get("tables", [])]
+rec("GET schema lists tables + counts (read-only introspection)",
+    code == 200 and "settings" in names and "usage_log" in names
+    and next(t for t in d["tables"] if t["name"] == "usage_log")["rowCount"] == 0,
+    str(names))
+
 
 def json_lower(obj):
     import json
