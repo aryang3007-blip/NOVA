@@ -96,30 +96,30 @@
 
   <!-- ─────── LEFT DOCK ─────── -->
   <nav class="dock" role="navigation" aria-label="Module dock">
-    <button class="dock-btn" data-panel="chat" title="Conversation" aria-label="Conversation panel">
+    <button class="dock-btn" data-panel="chat" data-flag="panel.chat" title="Conversation" aria-label="Conversation panel">
       <span class="dock-ico">💬</span><span class="dock-lbl">CHAT</span>
     </button>
-    <button class="dock-btn" data-panel="vision" title="Vision &amp; gestures" aria-label="Vision panel">
+    <button class="dock-btn" data-panel="vision" data-flag="panel.vision" title="Vision &amp; gestures" aria-label="Vision panel">
       <span class="dock-ico">👁</span><span class="dock-lbl">VISION</span>
     </button>
-    <a class="dock-btn" href="/screen" id="dock-live"
+    <a class="dock-btn" href="/screen" id="dock-live" data-flag="page.live"
        title="AURA Live — full screen control page" aria-label="AURA Live">
       <span class="dock-ico">🖵</span><span class="dock-lbl">LIVE</span>
     </a>
-    <button class="dock-btn" data-panel="devconsole" title="Developer console — how AURA thinks" aria-label="Developer console">
+    <button class="dock-btn" data-panel="devconsole" data-flag="panel.dev" title="Developer console — how AURA thinks" aria-label="Developer console">
       <span class="dock-ico">⌬</span><span class="dock-lbl">DEV</span>
     </button>
-    <button class="dock-btn" data-panel="ops" title="System center — telemetry, memory, diagnostics" aria-label="System center">
+    <button class="dock-btn" data-panel="ops" data-flag="panel.system" title="System center — telemetry, memory, diagnostics" aria-label="System center">
       <span class="dock-ico">◈</span><span class="dock-lbl">SYSTEM</span>
     </button>
-    <button class="dock-btn" data-panel="wardrobe" title="Avatar wardrobe" aria-label="Wardrobe panel">
+    <button class="dock-btn" data-panel="wardrobe" data-flag="panel.style" title="Avatar wardrobe" aria-label="Wardrobe panel">
       <span class="dock-ico">👕</span><span class="dock-lbl">STYLE</span>
     </button>
     <div class="dock-sep"></div>
-    <button id="dock-mic" class="dock-btn accent" title="Toggle microphone (Space)" aria-label="Toggle microphone">
+    <button id="dock-mic" class="dock-btn accent" data-flag="panel.mic" title="Toggle microphone (Space)" aria-label="Toggle microphone">
       <span class="dock-ico">🎙</span><span class="dock-lbl">MIC</span>
     </button>
-    <button id="dock-speak" class="dock-btn" title="Toggle voice output (M)" aria-label="Toggle voice output">
+    <button id="dock-speak" class="dock-btn" data-flag="panel.voice" title="Toggle voice output (M)" aria-label="Toggle voice output">
       <span class="dock-ico">🔊</span><span class="dock-lbl">VOICE</span>
     </button>
   </nav>
@@ -512,22 +512,24 @@
   <div class="modal-box">
     <header class="modal-h">
       <h2 id="settings-title">SETTINGS</h2>
+      <a class="icon-btn" href="/controls" title="Master Controls — turn features on/off"
+         aria-label="Open Master Controls">🎛</a>
       <button id="btn-settings-close" class="icon-btn" aria-label="Close settings">✕</button>
     </header>
 
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-tab="ai" role="tab">AI CORE</button>
-      <button class="tab" data-tab="voice" role="tab">VOICE</button>
-      <button class="tab" data-tab="vision" role="tab">VISION</button>
-      <button class="tab" data-tab="ui" role="tab">INTERFACE</button>
-      <button class="tab" data-tab="connect" role="tab">CONNECT</button>
-      <button class="tab" data-tab="devices" role="tab">DEVICES</button>
-      <button class="tab" data-tab="appearance" role="tab">APPEARANCE</button>
-      <button class="tab" data-tab="memory" role="tab">MEMORY</button>
-      <button class="tab" data-tab="avatar" role="tab">AVATAR</button>
-      <button class="tab" data-tab="desktop" role="tab">DESKTOP</button>
-      <button class="tab" data-tab="keys" role="tab">KEYS &amp; SPEND</button>
-      <button class="tab" data-tab="about" role="tab">ABOUT</button>
+      <button class="tab active" data-tab="ai" data-flag="ui.ai" role="tab">AI CORE</button>
+      <button class="tab" data-tab="voice" data-flag="ui.voice" role="tab">VOICE</button>
+      <button class="tab" data-tab="vision" data-flag="ui.vision" role="tab">VISION</button>
+      <button class="tab" data-tab="ui" data-flag="ui.interface" role="tab">INTERFACE</button>
+      <button class="tab" data-tab="connect" data-flag="ui.connect" role="tab">CONNECT</button>
+      <button class="tab" data-tab="devices" data-flag="ui.devices" role="tab">DEVICES</button>
+      <button class="tab" data-tab="appearance" data-flag="ui.appearance" role="tab">APPEARANCE</button>
+      <button class="tab" data-tab="memory" data-flag="ui.memory" role="tab">MEMORY</button>
+      <button class="tab" data-tab="avatar" data-flag="ui.avatar" role="tab">AVATAR</button>
+      <button class="tab" data-tab="desktop" data-flag="ui.desktop" role="tab">DESKTOP</button>
+      <button class="tab" data-tab="keys" data-flag="ui.keys" role="tab">KEYS &amp; SPEND</button>
+      <button class="tab" data-tab="about" data-flag="ui.about" role="tab">ABOUT</button>
     </nav>
 
     <div class="modal-body">

@@ -449,6 +449,12 @@ export class AIEngine {
     switch (call.service || call.tool) {
 
       case 'docgen': {
+        // Master Controls: docgen is an explicitly hideable pipeline. The
+        // turn stays honest instead of pretending the file was made.
+        const { isOn } = await import('./../features/controls.js');
+        if (!(await isOn('pipe.docgen'))) {
+          return { success: false, message: 'Document generation is turned off in Master Controls.' };
+        }
         const A = this.actions;
         if (!A?.available) {
           return { success: false, message: 'The desktop bridge is off — restart with `--allow-actions` and I can create the file.' };
@@ -501,6 +507,10 @@ export class AIEngine {
       }
 
       case 'research': {
+        const { isOn } = await import('./../features/controls.js');
+        if (!(await isOn('pipe.websearch'))) {
+          return { success: false, message: 'Web research is turned off in Master Controls.' };
+        }
         const digest = await this._researchDigest(String(p.topic || rawInput),
                                                   { depth: p.depth, results: p.results });
         if (!digest) {

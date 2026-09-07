@@ -18,6 +18,7 @@ from .repositories import (
     wake_repo, app_repo, permission_repo, usage_repo
 )
 from .importer import import_client_storage
+from . import feature_flags
 
 
 _SETTINGS_KEY_RE = __import__("re").compile(r"^[A-Za-z0-9._\-]{1,128}$")
@@ -74,6 +75,10 @@ class PersistenceAPIHandler:
 
         if sub == "schema":
             return {"ok": True, "tables": _schema()}, 200
+
+        if sub == "flags":
+            return {"ok": True, "flags": feature_flags.defs(),
+                    "counts": feature_flags.counts()}, 200
 
         if sub == "memory/conversation":
             session_id = q.get("session") or None
@@ -179,6 +184,28 @@ class PersistenceAPIHandler:
                         pass
             config_repo.set(key, value)
             return {"ok": True, "key": key, "value": config_repo.get(key)}, 200
+
+        if sub == "flags":
+            fid = str(payload.get("id") or "").strip()
+            enabled = payload.get("enabled")
+            # bool-only (JSON true/false); accept 0/1 too, never strings.
+            if isinstance(enabled, int) and enabled in (0, 1):
+                enabled = bool(enabled)
+            if not isinstance(enabled, bool):
+                return {"ok": False,
+                        "message": "enabled must be true or false."}, 400
+            ok, msg = feature_flags.set_flag(fid, enabled)
+            if not ok:
+                return {"ok": False, "message": msg}, 400
+            return {"ok": True, "message": msg,
+                    "flags": feature_flags.defs(),
+                    "counts": feature_flags.counts()}, 200
+
+        if sub == "flags/reset":
+            st = feature_flags.reset()
+            return {"ok": True, "message": "All features reset to ON.",
+                    "flags": feature_flags.defs(),
+                    "counts": feature_flags.counts()}, 200
 
         if sub == "restore":
             src = str(payload.get("path") or "").strip()

@@ -166,6 +166,18 @@ def generate(prompt, style="flat illustration", provider="gemini", outdir=None,
     lands in the usage ledger.
     Returns {ok, path?, provider?, model?, message}.
     """
+    # Master Controls: AI image generation is an explicitly hideable pipeline.
+    # FAIL-OPEN — if the flag system cannot be read the call proceeds, so a
+    # control setting can never silently break an allowed deck build.
+    try:
+        from persistence import feature_flags as _ff
+        if not bool(_ff.is_on("pipe.images")):
+            return {"ok": False, "off": True, "code": "feature_off",
+                    "message": "AI image generation is turned off in Master "
+                               "Controls — search-first visuals and native "
+                               "fallbacks still work."}
+    except Exception:
+        pass
     prov = next((p for p in providers() if p["id"] == provider), None)
     if not prov:
         return {"ok": False, "message": f"unknown image provider '{provider}'"}

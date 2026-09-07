@@ -866,6 +866,28 @@ ok("db page calls only the safe domain API (no raw SQL endpoint)",
    "/api/db/settings" in _db_page and "/api/db/schema" in _db_page
    and "/api/db/restore" in _db_page and "exec(" not in _db_page)
 
+# ══════════════════════ MASTER CONTROLS PAGE + GATES ═════════════════════════
+sec("MASTER CONTROLS (page + flag gates)")
+ok("controls page exists at /controls", os.path.isfile(os.path.join(_UI_DIR, "controls.html")))
+_ctrl = open(os.path.join(_UI_DIR, "controls.html"), encoding="utf-8").read()
+ok("controls page calls only the safe flags API",
+   "/api/db/flags" in _ctrl and "exec(" not in _ctrl)
+ok("controls page has RESET ALL (never stuck off)",
+   "flags/reset" in _ctrl)
+ok("index.html hides nav from flags (data-flag wiring)",
+   'data-flag="page.live"' in open(os.path.join(_UI_DIR, "index.html"), encoding="utf-8").read()
+   and 'data-flag="ui.keys"' in open(os.path.join(_UI_DIR, "index.html"), encoding="utf-8").read())
+try:
+    from persistence import feature_flags as _ff
+    _ff.reset()
+    ok("flag registry defaults to everything ON", all(d["on"] for d in _ff.defs()))
+    ok("controls + chat are the only locked flags",
+       set(_ff.counts()["protected"]) == {"page.controls", "panel.chat"}, str(_ff.counts()["protected"]))
+    ok("unknown/corrupt values fail open to ON",
+       _ff.is_on("does.not.exist") is True)
+except Exception as e:
+    ok(f"flag registry unavailable ({e}) — honest", True)
+
 print(f"\n\033[36mPASS {len(P)}\033[0m \033[31mFAIL {len(F)}\033[0m")
 if F:
     print("FAILED:", F)

@@ -181,11 +181,25 @@ try:
     from persistence import db_manager, credential_vault
     from persistence.importer import seed_wake_phrases_from_file
     from persistence.api import PersistenceAPIHandler
+    from persistence import feature_flags as _flags
     _db_init_info = db_manager.initialize()
     seed_wake_phrases_from_file()
 except Exception as e:
     _db_init_info = {"ok": False, "error": str(e)}
     say(c(31, f"  !! Persistence subsystem failed to initialize: {e}"))
+    _flags = None
+
+
+def _feature_on(flag_id: str) -> bool:
+    """Feature gate used by serve.py. FAIL-OPEN: if the flag system is
+    unavailable or the id unknown, the feature stays available — a
+    control setting can never 404 the site."""
+    try:
+        if _flags is None:
+            return True
+        return bool(_flags.is_on(flag_id))
+    except Exception:
+        return True
 
 
 FAVICON_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
@@ -257,8 +271,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(FAVICON_SVG)
             return
 
+        # ── /controls (/master) — Master Controls. This page can never be
+        #    turned off (protected flag) so the owner always has a way back
+        #    in, even after hiding everything else.
+        if path in ("/controls", "/controls/", "/master", "/master/"):
+            try:
+                with open(os.path.join(ROOT, "controls.html"), "rb") as f:
+                    body = f.read()
+            except Exception as e:
+                return self._json({"ok": False, "message": f"controls page missing: {e}"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # ── /screen — AURA Live, the full screen-control page.
         if path in ("/screen", "/screen/", "/live", "/live/"):
+            if not _feature_on("page.live"):
+                return self._json({"ok": False, "message": "AURA Live is turned off in Master Controls.", "code": "feature_off"}, 404)
             try:
                 with open(os.path.join(ROOT, "live.html"), "rb") as f:
                     body = f.read()
@@ -274,6 +307,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         # ── /phone — the Android companion page.
         if path in ("/phone", "/phone/", "/companion"):
+            if not _feature_on("page.phone"):
+                return self._json({"ok": False, "message": "Phone companion is turned off in Master Controls.", "code": "feature_off"}, 404)
             try:
                 with open(os.path.join(ROOT, "phone.html"), "rb") as f:
                     body = f.read()
@@ -296,6 +331,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # ── /db — database management page (settings values, tables, budget,
         #    usage, backup/restore). Same-origin local admin page.
         if path in ("/db", "/db/"):
+            if not _feature_on("page.db"):
+                return self._json({"ok": False, "message": "Database manager is turned off in Master Controls.", "code": "feature_off"}, 404)
             try:
                 with open(os.path.join(ROOT, "db.html"), "rb") as f:
                     body = f.read()
@@ -311,6 +348,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         # ── /dev — version + release notes, served as a real page.
         if path in ("/dev", "/dev/"):
+            if not _feature_on("page.dev"):
+                return self._json({"ok": False, "message": "Developer page is turned off in Master Controls.", "code": "feature_off"}, 404)
             try:
                 with open(os.path.join(ROOT, "dev.html"), "rb") as f:
                     body = f.read()
@@ -506,6 +545,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not self._authed():
                 return self._json({"ok": False, "message": "Bad token."}, 401)
             return self._json({"ok": True, "apps": bridge.list_apps(), "os": bridge.SYSTEM})
+
+        # ── /dev/* static files (dev harness surfaces) — gated too, so a
+        #    hidden page cannot be reached by typing a URL.
+        if path.startswith("/dev/"):
+            rel = path[len("/dev/"):].split("?")[0].lstrip("/")
+            if not _feature_on("page.dev"):
+                return self._json({"ok": False, "message": "Developer page is turned off in Master Controls.", "code": "feature_off"}, 404)
+            if rel == "image-test.html" and not _feature_on("dev.imageTest"):
+                return self._json({"ok": False, "message": "Image production test UI is turned off in Master Controls.", "code": "feature_off"}, 404)
 
         return super().do_GET()
 
@@ -2128,6 +2176,10 @@ def _terminal_repl_loop():
                     say(f"  {c(33, '/clear')}               Clear screen & refresh dashboard")
                     say(f"  {c(33, '/exit')} / {c(33, '/quit')}       Shut down AURA server\n")
                 elif cmd in ("/doc",):
+                    if not _feature_on("pipe.docgen"):
+                        say(c(31, "\n  Document generation is turned OFF in Master Controls."))
+                        say(c(33, "  Re-enable it at http://127.0.0.1:PORT/controls (or Settings → Master Controls).".replace("PORT", str(PORT))))
+                        continue
                     if not arg:
                         has_pptx = docbuilder.HAS_PPTX if (docbuilder and hasattr(docbuilder, 'HAS_PPTX')) else False
                         has_xlsx = docbuilder.HAS_XLSX if (docbuilder and hasattr(docbuilder, 'HAS_XLSX')) else False

@@ -16,6 +16,7 @@ import { SpeechInput, SpeechOutput, stripMarkdownForSpeech } from './voice/speec
 import { WakeWordEngine } from './voice/wake-word-engine.js';
 import { VisionModule } from './vision/vision.js';
 import { GESTURES } from './vision/gesture-classifier.js';
+import { applyFlagVisibility, label as flagLabel } from './features/controls.js';
 import { Avatar3D } from './avatar/avatar3d.js';
 import { AvatarManager } from './avatar/avatar-manager.js';
 import { OUTFITS, PALETTES, ACCESSORIES, HAIRSTYLES, HAIR_COLORS, BODY_PRESETS } from './avatar/outfits.js';
@@ -907,6 +908,19 @@ class AuraApp {
     this.wireAgentState();
     this.wireTaskCards();
     this.wireAuraLiveToggle();
+    // Master Controls: hide every [data-flag] element whose feature is off.
+    // Fail-open — a fetch error hides nothing, so the site can't brick.
+    applyFlagVisibility().then((s) => {
+      const off = Object.keys(s).filter((k) => s[k] === false);
+      if (off.length) this.log(`Master Controls: ${off.length} feature(s) hidden`, 'warn');
+      // If the ACTIVE settings tab was hidden, move to the first visible one
+      // so the modal never opens onto an orphaned, unreachable pane.
+      const active = document.querySelector('.tab.active');
+      if (active?.hidden) {
+        const first = document.querySelector('.tab:not([hidden])');
+        if (first) first.dispatchEvent(new Event('click'));
+      }
+    });
     this.devConsole?.mount();
     this.wireAvatarHeight();
     $('face-enrol')?.addEventListener('click', () => this.startFaceEnrollment());
@@ -3311,7 +3325,7 @@ class AuraApp {
 
   /** Open a feature popup with shared context (engine + actions + config). */
   async openFeaturePopup(id, prefill = {}) {
-    await openFeature(id, prefill, {
+    const r = await openFeature(id, prefill, {
       engine: this.ai,
       actions: this.actions,
       config,
@@ -3319,6 +3333,18 @@ class AuraApp {
       toast: (t, m) => this.toast(t, m),
       audio: this.audio,
     });
+    if (!r.ok) {
+      // Master Controls block (or unknown feature): stay honest, no dead
+      // "is open" message, and never pretend the feature opened.
+      if (r.flag) {
+        const f = flagLabel(r.flag);
+        this.pushSystemMessage(`🔒 ${f} is switched OFF in Master Controls — re-enable it there to use it.`);
+        this.toast('warn', `${f} is off.`);
+      } else if (r.reason && !r.reason.includes('feature off')) {
+        this.pushSystemMessage(`⚠️ ${id} could not open: ${r.reason}`);
+      }
+      return false;
+    }
     // Tell the user a popup is open (voice + visible system line) so the
     // wake-word request never ends in silence.
     const label = { pptx: 'PPT Builder', docx: 'Word Builder', xlsx: 'Workbook Builder',
@@ -3326,6 +3352,7 @@ class AuraApp {
     this.pushSystemMessage(`🪟 ${label} is open — choose the design, length, images and motion, then generate.`);
     this.voice.output?.speak?.(`The ${label} is open. Choose the design and I will build it.`,
       { emotion: 'happy' });
+    return true;
   }
 
   autoGrow(el) {

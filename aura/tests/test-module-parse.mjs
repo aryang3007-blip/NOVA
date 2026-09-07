@@ -49,7 +49,8 @@ for (const f of files) {
 ok(`${files.length} modules parsed`, pass === files.length, `${pass}/${files.length}`);
 
 section('Inline <script> blocks in the pages parse too');
-for (const page of ['index.html', 'dev.html', 'live.html', 'phone.html']) {
+for (const page of ['index.html', 'dev.html', 'live.html', 'phone.html',
+                    'db.html', 'controls.html']) {
   const p = path.join(root, page);
   if (!statSync(p).isFile?.() && !require) { /* keep simple */ }
   try {

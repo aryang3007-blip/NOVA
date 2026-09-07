@@ -8,6 +8,7 @@
  * @module features/launcher
  */
 import { feature } from './registry.js';
+import { isOn } from './controls.js';
 
 const MODAL_CSS = `
 #feature-modal { position: fixed; inset: 0; z-index: 500; display: grid;
@@ -131,6 +132,12 @@ function injectStyles() {
 export async function openFeature(id, prefill = {}, ctx = {}) {
   const meta = feature(id);
   if (!meta) return { ok: false, reason: `unknown feature '${id}'` };
+  // Master Controls gate — also reached from typed intents, wake words and
+  // STT, so a hidden feature cannot sneak in through any path.
+  if (!(await isOn(`apps.${id}`))) {
+    if (ctx?.toast) ctx.toast('warn', `${id} is turned off in Master Controls.`);
+    return { ok: false, reason: 'feature off', flag: `apps.${id}` };
+  }
   injectStyles();
   let host = document.getElementById('feature-modal');
   if (!host) {

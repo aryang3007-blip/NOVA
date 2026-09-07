@@ -1125,9 +1125,55 @@ def detect_installed_apps():
 
 
 # ── dispatcher ────────────────────────────────────────────────────────────
+def _feature_off(flag_id):
+    """Master Controls gate for bridge actions. FAIL-OPEN: if flags cannot
+    be read (no DB, import error, unknown id) the action stays available —
+    a control setting can never brick actions the shell depends on."""
+    try:
+        from persistence import feature_flags as _ff
+        return not bool(_ff.is_on(flag_id))
+    except Exception:
+        return False
+
+
 def dispatch(action, params):
     """Route a validated action. Returns a JSON-serialisable dict."""
     p = params or {}
+
+    # ── Master Controls gates (server-side, not CSS) ───────────────────
+    if action in ("doc_outline", "doc_build", "doc_capabilities", "doc_ui"):
+        if _feature_off("pipe.docgen"):
+            return {"ok": False, "disabled": True, "code": "feature_off",
+                    "message": "Document generation is turned off in Master Controls."}
+    if action == "image_test":
+        if _feature_off("dev.imageTest") or _feature_off("pipe.images"):
+            return {"ok": False, "disabled": True, "code": "feature_off",
+                    "message": "Image production test UI is turned off in Master Controls."}
+    if action in ("web_capabilities", "web_search", "web_research", "read_page"):
+        if _feature_off("pipe.websearch"):
+            return {"ok": False, "disabled": True, "code": "feature_off",
+                    "message": "Web search is turned off in Master Controls."}
+    if action.startswith("organize_"):
+        if _feature_off("pipe.organizer"):
+            return {"ok": False, "disabled": True, "code": "feature_off",
+                    "message": "File organizer is turned off in Master Controls."}
+    if action.startswith("automation_"):
+        if _feature_off("pipe.automation"):
+            return {"ok": False, "disabled": True, "code": "feature_off",
+                    "message": "Desktop automation is turned off in Master Controls."}
+    # desktop surface: user-initiated only — shell boot calls (system_info,
+    # get_policy, detect_apps) stay available so the app can never brick.
+    if action in ("open_app", "open_url", "search", "media", "volume",
+                  "screenshot", "list_apps", "running_apps",
+                  "window_action", "clipboard_read", "clipboard_write",
+                  "run_command", "open_folder", "open_terminal",
+                  "list_directory", "read_file", "write_file") or \
+            action.startswith("overlay_") or action.startswith("device_") or \
+            action.startswith("window_") or action.startswith("vdesk_"):
+        if _feature_off("pipe.desktop"):
+            return {"ok": False, "disabled": True, "code": "feature_off",
+                    "message": "Desktop actions are turned off in Master Controls."}
+
     if action == "open_app":
         return open_app(p.get("app"), p.get("arg"))
     if action == "open_url":
