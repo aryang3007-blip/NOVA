@@ -6,6 +6,13 @@ No build step. No backend. No `npm install` required to run.
 
 ![Command Center](screenshots/08-command-center.png)
 
+> **📚 Working on NOVA yourself?** Start with the
+> [`guides/`](../guides/README.md) folder — the full pages map, architecture,
+> server/API reference, persistence, docgen/visuals pipelines, Master
+> Controls, testing and the project's rules. The guides are the
+> authoritative, up-to-date handbook (the older `docs/` chapters may lag
+> behind).
+
 ---
 
 ## Quick start (Windows)
