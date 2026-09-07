@@ -1,9 +1,161 @@
 {
-  "version": "1.0.0",
+  "version": "1.7.0",
   "codename": "NOVA Cognitive Assistant",
-  "date": "2026-08-15",
+  "date": "2026-09-07",
   "assertions": 3500,
   "releases": [
+    {
+      "version": "1.7.0",
+      "codename": "Working Guides",
+      "date": "2026-09-07",
+      "headline": "The full working handbook for the project — 14 guides, verified against the code.",
+      "changes": [
+        {
+          "kind": "note",
+          "text": "**`guides/`** — pages map (all 7 pages + how to add one), quickstart, architecture, server/bridge/API, persistence/DB/vault, docgen pipeline, images & Visual Resolution Engine, features & apps, Master Controls, frontend map, testing, conventions & pitfalls, and a one-page cheatsheet."
+        },
+        {
+          "kind": "note",
+          "text": "`aura/README.md` now links to `guides/` as the authoritative, up-to-date handbook (older `docs/` chapters may lag)."
+        }
+      ]
+    },
+    {
+      "version": "1.6.0",
+      "codename": "Master Controls",
+      "date": "2026-09-07",
+      "headline": "One page to turn every feature, page and pipeline ON or OFF — and nothing can break the site.",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**`/controls`** (alias `/master`) — one page with 35 toggles: pages (/screen, /phone, /db, /dev, image test), dock panels, all 12 settings tabs, feature apps (PPT/Word/Excel/Research) and pipelines (docgen, images, web search, organizer, automation, desktop). RESET ALL included."
+        },
+        {
+          "kind": "feature",
+          "text": "**Routing-layer gating, not CSS.** Hidden pages return an honest `feature_off` 404 at the server; hidden apps are rejected in the launcher, typed intents, wake word and the AI engine; hidden pipelines are blocked in the bridge, terminal `/doc` and the image engine."
+        },
+        {
+          "kind": "safety",
+          "text": "Unbreakable by design: everything defaults ON; unknown/corrupt/failed values resolve to ON; `page.controls` and `panel.chat` are locked; shell-critical bridge calls are never gated, so boot can't break from any toggle combination."
+        }
+      ]
+    },
+    {
+      "version": "1.5.0",
+      "codename": "Database Manager + Image Test Harness",
+      "date": "2026-09-07",
+      "headline": "/db — a real management page for the database — plus a temporary image-production test UI.",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**`/db` Database Manager.** Status (path, schema version, integrity, size), read-only schema browser with row counts, settings key→JSON editor with validation, budget editor, usage ledger, vault slots, backup/restore with an automatic pre-restore snapshot."
+        },
+        {
+          "kind": "feature",
+          "text": "**`/dev/image-test.html`** — temporary, clearly-labelled harness to generate one image (or one test slide) with provider/model/style, returning the full JSON result."
+        },
+        {
+          "kind": "safety",
+          "text": "No raw SQL over HTTP. The page uses only the safe domain API; settings keys are validated server-side (letters/digits/dot/dash/underscore, ≤128 chars)."
+        }
+      ]
+    },
+    {
+      "version": "1.4.0",
+      "codename": "Visual Resolution Engine",
+      "date": "2026-09-05",
+      "headline": "Search first, AI second, native last — the backend decides how every visual gets made.",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**Priority resolution.** Photo/reference/scientific/historical/person/logo/product → web library search; decorative/fictional/illustration → AI generation; diagram/chart/icon → native PPT shapes. `smart` mode is the default."
+        },
+        {
+          "kind": "feature",
+          "text": "**Search adapters.** Wikimedia Commons, Openverse, NASA plus a general ddgs-based adapter, with per-type source preference chains."
+        },
+        {
+          "kind": "feature",
+          "text": "**Visual source modes** — Smart / Web-only / AI-only / None, on top of the model selector and IMAGES-ONLY key entry. `@gen:` forces AI for one slide."
+        },
+        {
+          "kind": "feature",
+          "text": "**Honest report** — `{embedded, failed, native, count, sources, details}`: resolved never implies embedded."
+        },
+        {
+          "kind": "safety",
+          "text": "Download guards (http(s) only, SSRF block, magic bytes, ≤25 MB, ≥256 px) and ONE retry on 429, then native fallback — a deck always completes and reports unavailable images honestly."
+        }
+      ]
+    },
+    {
+      "version": "1.3.0",
+      "codename": "One Key, Every Provider",
+      "date": "2026-09-05",
+      "headline": "OpenRouter image generation — the same Gemini Nano Banana models through one key.",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**OpenRouter provider.** Dedicated `openrouter-image` slot (strict — never used for chat or outlines) serving Nano Banana 2, 2 Lite, Pro and 2.5 Flash Image through one key."
+        },
+        {
+          "kind": "feature",
+          "text": "Provider picker in PPT Builder → Images & Visuals: Gemini / OpenAI / OpenRouter, each with its own model list and key slot."
+        },
+        {
+          "kind": "fix",
+          "text": "`imagen-3.0-generate-002` removed — it was shut down. Only live Gemini `*-image` models are offered for generation."
+        }
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "codename": "Two-Key RPM Split",
+      "date": "2026-09-04",
+      "headline": "Image generation gets its own strict key and pacing — one provider's budget can never starve the other.",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**Images-only key slots.** `gemini-image` and `openai-image` are used exclusively for image creation; the chat/outline key is never read for images."
+        },
+        {
+          "kind": "feature",
+          "text": "**RPM pacing.** Per-key `min_interval` between image calls (default 5 s), so a burst cannot trip the provider's rate limit."
+        },
+        {
+          "kind": "safety",
+          "text": "Strict separation both ways — image keys are never used for chat/outline and outline keys never for images, so the two budgets stay independent."
+        }
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "codename": "Keys & Spend",
+      "date": "2026-09-04",
+      "headline": "Usage ledger and daily budgets — every AI call counted, quota never costs money.",
+      "changes": [
+        {
+          "kind": "feature",
+          "text": "**Usage ledger.** Every model call is recorded (provider, model, kind, status, detail) and browsable — chat, outline and image calls included."
+        },
+        {
+          "kind": "feature",
+          "text": "**Daily budgets.** Separate caps for requests, images and outlines, per provider, edited in Settings → Keys & Spend."
+        },
+        {
+          "kind": "safety",
+          "text": "**Budget before wire.** The spend guard runs BEFORE any network call; a blocked call sends nothing and is logged as `blocked`."
+        },
+        {
+          "kind": "feature",
+          "text": "**Quota resilience.** HTTP 429/503 is retried once and then reported honestly — no endless retry loops, no silent failure."
+        },
+        {
+          "kind": "fix",
+          "text": "Spend settings moved into a real Settings tab (Keys & Spend) instead of being scattered in the old keys section."
+        }
+      ]
+    },
     {
       "version": "1.0.0",
       "codename": "NOVA Cognitive Assistant",
@@ -32,23 +184,23 @@
       "changes": [
         {
           "kind": "feature",
-          "text": "**The AI Sphere.** A canvas-rendered golden energy core \u2014 orbital rings, particle shell, energy bands, glowing centre. It is the new default avatar and the product's identity."
+          "text": "**The AI Sphere.** A canvas-rendered golden energy core — orbital rings, particle shell, energy bands, glowing centre. It is the new default avatar and the product's identity."
         },
         {
           "kind": "feature",
-          "text": "**Nine agent states, driven by real events**: idle, listening, thinking, planning, executing, success, error, connecting, connected. Measured as visually distinct \u2014 `success` nearly triples the lit pixels, `error` shifts hot and unstable, `connecting` sweeps a scan bar. Every one is wired to an actual subsystem event, never a timer."
+          "text": "**Nine agent states, driven by real events**: idle, listening, thinking, planning, executing, success, error, connecting, connected. Measured as visually distinct — `success` nearly triples the lit pixels, `error` shifts hot and unstable, `connecting` sweeps a scan bar. Every one is wired to an actual subsystem event, never a timer."
         },
         {
           "kind": "feature",
-          "text": "**Command Gold theme** \u2014 near-black (#050505) with a warm gold accent, now the default. Backgrounds stay neutral black on purpose: a warm background plus a warm accent muddies both."
+          "text": "**Command Gold theme** — near-black (#050505) with a warm gold accent, now the default. Backgrounds stay neutral black on purpose: a warm background plus a warm accent muddies both."
         },
         {
           "kind": "feature",
-          "text": "**Task cards** (spec \u00a717/\u00a719/\u00a764/\u00a773): the command echoed back, a numbered plan that ticks off as steps complete, a progress bar fed by real trace steps, CANCEL, and generated files surfaced with an OPEN button."
+          "text": "**Task cards** (spec §17/§19/§64/§73): the command echoed back, a numbered plan that ticks off as steps complete, a progress bar fed by real trace steps, CANCEL, and generated files surfaced with an OPEN button."
         },
         {
           "kind": "safety",
-          "text": "Progress can never reach 100% while a task is still running, and a cancelled task can never report success \u2014 `Trace.end()` downgrades it even if the caller passes 'ok'. Cancellation is honest about being cooperative: the button reads STOPPING\u2026 because a native call already in flight cannot be killed."
+          "text": "Progress can never reach 100% while a task is still running, and a cancelled task can never report success — `Trace.end()` downgrades it even if the caller passes 'ok'. Cancellation is honest about being cooperative: the button reads STOPPING… because a native call already in flight cannot be killed."
         },
         {
           "kind": "fix",
@@ -56,7 +208,7 @@
         },
         {
           "kind": "note",
-          "text": "The humanoid avatar is unchanged and one click away in Settings \u2192 Avatar. Kept AURA's vanilla-JS + Python-stdlib stack \u2014 no build step, still offline-first, all existing tests still passing."
+          "text": "The humanoid avatar is unchanged and one click away in Settings → Avatar. Kept AURA's vanilla-JS + Python-stdlib stack — no build step, still offline-first, all existing tests still passing."
         }
       ]
     },
@@ -64,23 +216,23 @@
       "version": "0.21.0",
       "codename": "Artifact",
       "date": "2026-08-12",
-      "headline": "AURA now makes real files \u2014 and pairing is a QR scan",
+      "headline": "AURA now makes real files — and pairing is a QR scan",
       "changes": [
         {
           "kind": "feature",
-          "text": "**`/doc ppt on quantum computing`** \u2014 genuine `.pptx`, `.xlsx` and `.docx` files, not text pretending to be Office documents. Verified as valid OOXML packages containing `ppt/presentation.xml`, `xl/workbook.xml` and `word/document.xml`."
+          "text": "**`/doc ppt on quantum computing`** — genuine `.pptx`, `.xlsx` and `.docx` files, not text pretending to be Office documents. Verified as valid OOXML packages containing `ppt/presentation.xml`, `xl/workbook.xml` and `word/document.xml`."
         },
         {
           "kind": "feature",
-          "text": "Works with **whatever model you have**: Gemini, OpenRouter or local Ollama \u2014 same provider the chat already uses. With no model at all it still writes a real, correctly-formatted skeleton and says on the title slide that no model was involved."
+          "text": "Works with **whatever model you have**: Gemini, OpenRouter or local Ollama — same provider the chat already uses. With no model at all it still writes a real, correctly-formatted skeleton and says on the title slide that no model was involved."
         },
         {
           "kind": "feature",
-          "text": "**`/organize`** sorts a folder into Images, Documents, Archives\u2026 It **previews first and moves nothing** until you confirm, refuses a stale or replayed plan, and journals every run so `/organize undo` puts all of it back."
+          "text": "**`/organize`** sorts a folder into Images, Documents, Archives… It **previews first and moves nothing** until you confirm, refuses a stale or replayed plan, and journals every run so `/organize undo` puts all of it back."
         },
         {
           "kind": "feature",
-          "text": "**QR pairing.** Settings \u2192 Devices shows a scannable code; the phone opens the right LAN URL with the 6 digits already filled in. Proven by screenshotting the rendered QR and decoding it with OpenCV \u2014 not by eye."
+          "text": "**QR pairing.** Settings → Devices shows a scannable code; the phone opens the right LAN URL with the 6 digits already filled in. Proven by screenshotting the rendered QR and decoding it with OpenCV — not by eye."
         },
         {
           "kind": "feature",
@@ -92,7 +244,7 @@
         },
         {
           "kind": "note",
-          "text": "Smart-home stays dropped, as you asked. Screen analysis, camera vision, browser automation, messaging and sequential automation were already built \u2014 usually deeper (grid-grounded clicking, a 14-step agent loop)."
+          "text": "Smart-home stays dropped, as you asked. Screen analysis, camera vision, browser automation, messaging and sequential automation were already built — usually deeper (grid-grounded clicking, a 14-step agent loop)."
         }
       ]
     },
@@ -100,23 +252,23 @@
       "version": "0.20.1",
       "codename": "Reach",
       "date": "2026-08-11",
-      "headline": "Four bugs you found on Windows \u2014 all four fixed",
+      "headline": "Four bugs you found on Windows — all four fixed",
       "changes": [
         {
           "kind": "feature",
-          "text": "**The companion page no longer assumes you are a phone.** Pick Android / iPhone / Windows / macOS / Linux, or press **AUTO-DETECT**. Capabilities, the default name and the wording all follow the choice \u2014 a Windows companion is never offered `vibrate`, and neither is iOS, because Safari has no Vibration API."
+          "text": "**The companion page no longer assumes you are a phone.** Pick Android / iPhone / Windows / macOS / Linux, or press **AUTO-DETECT**. Capabilities, the default name and the wording all follow the choice — a Windows companion is never offered `vibrate`, and neither is iOS, because Safari has no Vibration API."
         },
         {
           "kind": "fix",
-          "text": "**Settings \u2192 Devices did not exist.** The phone page told you to open it; it was never built \u2014 pairing was only reachable via the `/devices` chat command. There is now a real DEVICES tab with the code, a live countdown, the companion URL, and the paired-device list with unpair."
+          "text": "**Settings → Devices did not exist.** The phone page told you to open it; it was never built — pairing was only reachable via the `/devices` chat command. There is now a real DEVICES tab with the code, a live countdown, the companion URL, and the paired-device list with unpair."
         },
         {
           "kind": "fix",
-          "text": "**The settings tab strip was being crushed, not hidden.** `.tabs` is a flex child and had the default `flex-shrink:1`, so a long tab (DESKTOP, ABOUT) squeezed it from 26px to 12\u201317px. Now `flex:none`, and switching tabs returns you to the top."
+          "text": "**The settings tab strip was being crushed, not hidden.** `.tabs` is a flex child and had the default `flex-shrink:1`, so a long tab (DESKTOP, ABOUT) squeezed it from 26px to 12–17px. Now `flex:none`, and switching tabs returns you to the top."
         },
         {
           "kind": "fix",
-          "text": "**The mic on/off loop on first login.** The restart-storm guard defeated itself: it counted a failure as a gap under 900ms between attempts, but its own backoff grew that gap to 1060ms, so the counter reset every third try and never reached its limit. It now judges how long recognition actually RAN and counts consecutive failures \u2014 a dead mic stops in about 7 seconds, a healthy one is never shut off."
+          "text": "**The mic on/off loop on first login.** The restart-storm guard defeated itself: it counted a failure as a gap under 900ms between attempts, but its own backoff grew that gap to 1060ms, so the counter reset every third try and never reached its limit. It now judges how long recognition actually RAN and counts consecutive failures — a dead mic stops in about 7 seconds, a healthy one is never shut off."
         },
         {
           "kind": "note",
@@ -128,11 +280,11 @@
       "version": "0.20.0",
       "codename": "Reach",
       "date": "2026-08-11",
-      "headline": "Hold a finger still and it clicks \u2014 plus the overlapping-text bug is gone",
+      "headline": "Hold a finger still and it clicks — plus the overlapping-text bug is gone",
       "changes": [
         {
           "kind": "feature",
-          "text": "**Dwell-to-click.** Point at something and hold still. A ring fills 0 \u2192 25 \u2192 50 \u2192 75 \u2192 100% on the camera overlay, then clicks. The last deferred item from the spec (\u00a74/\u00a75) is now built."
+          "text": "**Dwell-to-click.** Point at something and hold still. A ring fills 0 → 25 → 50 → 75 → 100% on the camera overlay, then clicks. The last deferred item from the spec (§4/§5) is now built."
         },
         {
           "kind": "feature",
@@ -140,15 +292,15 @@
         },
         {
           "kind": "safety",
-          "text": "**New `Vision Mouse Control` permission.** Clicking AURA's own buttons needs nothing \u2014 it is your own page. Clicking your *desktop* needs the permission AND a full-monitor share AND an armed bridge. All three refuse out loud, never silently."
+          "text": "**New `Vision Mouse Control` permission.** Clicking AURA's own buttons needs nothing — it is your own page. Clicking your *desktop* needs the permission AND a full-monitor share AND an armed bridge. All three refuse out loud, never silently."
         },
         {
           "kind": "fix",
-          "text": "**The Privacy Guard text really was overlapping the camera logs.** `#trace-log` was an in-flow child of `.panels` while every panel is `position:absolute` with a transparent background \u2014 two text layers on the same pixels. The trace now lives in its own opaque dock that takes real space. A new detector, `tests/find-overlaps.py`, found 240 collisions across 3 viewports and now reports **0**."
+          "text": "**The Privacy Guard text really was overlapping the camera logs.** `#trace-log` was an in-flow child of `.panels` while every panel is `position:absolute` with a transparent background — two text layers on the same pixels. The trace now lives in its own opaque dock that takes real space. A new detector, `tests/find-overlaps.py`, found 240 collisions across 3 viewports and now reports **0**."
         },
         {
           "kind": "fix",
-          "text": "**ENABLE CAMERA was being cut off** at 1280x800 \u2014 the placeholder is taller than the 4:3 box and was clipped. Same bug on `/screen`'s CHOOSE A SURFACE. Both scroll now instead of hiding their own button."
+          "text": "**ENABLE CAMERA was being cut off** at 1280x800 — the placeholder is taller than the 4:3 box and was clipped. Same bug on `/screen`'s CHOOSE A SURFACE. Both scroll now instead of hiding their own button."
         },
         {
           "kind": "fix",
@@ -160,7 +312,7 @@
         },
         {
           "kind": "note",
-          "text": "Desktop clicks cannot be exercised here \u2014 this sandbox has no display and no pyautogui, so that path reports the bridge's real refusal. The web-click path is proven end-to-end: a dwell on a real button really fires its handler."
+          "text": "Desktop clicks cannot be exercised here — this sandbox has no display and no pyautogui, so that path reports the bridge's real refusal. The web-click path is proven end-to-end: a dwell on a real button really fires its handler."
         }
       ]
     },
@@ -172,19 +324,19 @@
       "changes": [
         {
           "kind": "fix",
-          "text": "**AURA Live was broken by my typo.** `js/live.js` called `resolveProvider?.()` \u2014 the method is `resolve()`. Optional chaining made it a silent no-op, so the page never connected to a model. Fixed and the `?.` removed so it fails loudly next time."
+          "text": "**AURA Live was broken by my typo.** `js/live.js` called `resolveProvider?.()` — the method is `resolve()`. Optional chaining made it a silent no-op, so the page never connected to a model. Fixed and the `?.` removed so it fails loudly next time."
         },
         {
           "kind": "feature",
-          "text": "**Face enrolment visuals** \u2014 a sweeping scan bar, dense mesh and live % ring on your face. Also fixed: enrolment was gated on a setting that is off by default, so `addSample()` never ran and progress genuinely sat at 0."
+          "text": "**Face enrolment visuals** — a sweeping scan bar, dense mesh and live % ring on your face. Also fixed: enrolment was gated on a setting that is off by default, so `addSample()` never ran and progress genuinely sat at 0."
         },
         {
           "kind": "feature",
-          "text": "**Device Gateway** \u2014 pair a phone at `/phone` over the LAN. 6-digit single-use code, device token, heartbeat, long-poll transport, auto-reconnect. Measured 7\u201317 ms latency."
+          "text": "**Device Gateway** — pair a phone at `/phone` over the LAN. 6-digit single-use code, device token, heartbeat, long-poll transport, auto-reconnect. Measured 7–17 ms latency."
         },
         {
           "kind": "feature",
-          "text": "\"Open YouTube on my phone\" routes to the phone; \"on my laptop\" executes here. An offline phone says so \u2014 it never fakes success."
+          "text": "\"Open YouTube on my phone\" routes to the phone; \"on my laptop\" executes here. An offline phone says so — it never fakes success."
         },
         {
           "kind": "safety",
@@ -216,11 +368,11 @@
         },
         {
           "kind": "feature",
-          "text": "**AURA Live toggle** \u2014 Settings \u2192 Vision. Hides the dock entry only; `/screen` and all its code stay intact and re-enabling restores it unchanged."
+          "text": "**AURA Live toggle** — Settings → Vision. Hides the dock entry only; `/screen` and all its code stay intact and re-enabling restores it unchanged."
         },
         {
           "kind": "note",
-          "text": "Android companion, dwell-to-click and the device gateway are NOT in this release \u2014 see the notes. I would rather ship the fix than a half-built device layer."
+          "text": "Android companion, dwell-to-click and the device gateway are NOT in this release — see the notes. I would rather ship the fix than a half-built device layer."
         }
       ]
     },
@@ -228,27 +380,27 @@
       "version": "0.18.0",
       "codename": "Privacy Guard",
       "date": "2026-08-07",
-      "headline": "Minimise the screen when someone appears behind you \u2014 local, instant, permission-gated",
+      "headline": "Minimise the screen when someone appears behind you — local, instant, permission-gated",
       "changes": [
         {
           "kind": "feature",
-          "text": "**Privacy Guard** \u2014 reuses the existing camera pipeline to detect a person behind you and minimise the focused window. No LLM, no screenshot, no network. Off by default, conservative by default."
+          "text": "**Privacy Guard** — reuses the existing camera pipeline to detect a person behind you and minimise the focused window. No LLM, no screenshot, no network. Off by default, conservative by default."
         },
         {
           "kind": "feature",
-          "text": "`windows_mgr.py` \u2014 minimises via `user32.ShowWindow(hwnd, SW_MINIMIZE)`. **No screen coordinates**, no window titles, no app names."
+          "text": "`windows_mgr.py` — minimises via `user32.ShowWindow(hwnd, SW_MINIMIZE)`. **No screen coordinates**, no window titles, no app names."
         },
         {
           "kind": "safety",
-          "text": "Vision cannot act alone: the guard proposes `desktop.minimize_active_window` and the Runtime's permission gate decides. It never auto-restores \u2014 there is no restore command in the registry."
+          "text": "Vision cannot act alone: the guard proposes `desktop.minimize_active_window` and the Runtime's permission gate decides. It never auto-restores — there is no restore command in the registry."
         },
         {
           "kind": "fix",
-          "text": "**Cooldown could be bypassed.** It compared event timestamps, which can arrive out of order \u2014 a stale burst re-fired the minimise 3 times. Now uses wall clock. Verified: 1 trigger, 20 suppressed."
+          "text": "**Cooldown could be bypassed.** It compared event timestamps, which can arrive out of order — a stale burst re-fired the minimise 3 times. Now uses wall clock. Verified: 1 trigger, 20 suppressed."
         },
         {
           "kind": "fix",
-          "text": "**Object detection diagnosed.** Not broken \u2014 `scoreThreshold: 0.42` was too high. Measured best score on a live frame: 0.453. Lowered to 0.28; detections now land at 0.32\u20130.675."
+          "text": "**Object detection diagnosed.** Not broken — `scoreThreshold: 0.42` was too high. Measured best score on a live frame: 0.453. Lowered to 0.28; detections now land at 0.32–0.675."
         }
       ]
     },
@@ -260,15 +412,15 @@
       "changes": [
         {
           "kind": "feature",
-          "text": "**`/screen`** \u2014 AURA Live. Everything screen-related in one place: share, ask, find, act, desktops, trace, settings. The dock button now navigates here."
+          "text": "**`/screen`** — AURA Live. Everything screen-related in one place: share, ask, find, act, desktops, trace, settings. The dock button now navigates here."
         },
         {
           "kind": "feature",
-          "text": "Every slash command has a real control \u2014 `/find` gets a live 12\u00d78 grid map, `/reticle` gets colour and style pickers, `/do` and `/task` share a segmented control, `/automation` shows a live expiry countdown."
+          "text": "Every slash command has a real control — `/find` gets a live 12×8 grid map, `/reticle` gets colour and style pickers, `/do` and `/task` share a segmented control, `/automation` shows a live expiry countdown."
         },
         {
           "kind": "feature",
-          "text": "Glassmorphism UI: layered frosted panels, ambient gradient light, cursor-tracked reflections, spring easing, ripple clicks, blur-morph transitions, shimmer skeletons. Transform/opacity only \u2014 no layout thrash."
+          "text": "Glassmorphism UI: layered frosted panels, ambient gradient light, cursor-tracked reflections, spring easing, ripple clicks, blur-morph transitions, shimmer skeletons. Transform/opacity only — no layout thrash."
         },
         {
           "kind": "feature",
@@ -276,7 +428,7 @@
         },
         {
           "kind": "fix",
-          "text": "Removed 10 dangling DOM references left in `main.js` after the old sidebar panel was deleted \u2014 caught by the architecture test."
+          "text": "Removed 10 dangling DOM references left in `main.js` after the old sidebar panel was deleted — caught by the architecture test."
         },
         {
           "kind": "note",
@@ -288,15 +440,15 @@
       "version": "0.16.0",
       "codename": "Real Reticle",
       "date": "2026-08-07",
-      "headline": "AURA's cursor is now actually on your screen \u2014 the old one never was",
+      "headline": "AURA's cursor is now actually on your screen — the old one never was",
       "changes": [
         {
           "kind": "fix",
-          "text": "**Correction.** \"AURA places its own cursor on your screen\" was false. The reticle only ever existed inside the SCREEN panel's preview canvas \u2014 a circle drawn on a *picture* of your screen. You were right to say you had never seen it."
+          "text": "**Correction.** \"AURA places its own cursor on your screen\" was false. The reticle only ever existed inside the SCREEN panel's preview canvas — a circle drawn on a *picture* of your screen. You were right to say you had never seen it."
         },
         {
           "kind": "feature",
-          "text": "`overlay.py` \u2014 a real click-through, always-on-top desktop reticle. On Windows it uses `WS_EX_TRANSPARENT` so clicks pass through it. Proven by pixel count under Xvfb: 2392 green pixels shown, 0 hidden."
+          "text": "`overlay.py` — a real click-through, always-on-top desktop reticle. On Windows it uses `WS_EX_TRANSPARENT` so clicks pass through it. Proven by pixel count under Xvfb: 2392 green pixels shown, 0 hidden."
         },
         {
           "kind": "feature",
@@ -304,7 +456,7 @@
         },
         {
           "kind": "feature",
-          "text": "`vdesk.py` + `/desktop setup` \u2014 give AURA its own Windows 11 virtual desktop, your idea. Uses documented Win+Ctrl shortcuts, not the undocumented COM API that breaks on every Windows update."
+          "text": "`vdesk.py` + `/desktop setup` — give AURA its own Windows 11 virtual desktop, your idea. Uses documented Win+Ctrl shortcuts, not the undocumented COM API that breaks on every Windows update."
         },
         {
           "kind": "note",
@@ -320,27 +472,27 @@
       "changes": [
         {
           "kind": "feature",
-          "text": "**Command Registry** \u2014 32 namespaced commands (`desktop.launch_app`, `input.click`, `vision.locate`\u2026), each with a schema, risk level and required permission. The AI may only pick from this list; an invented name is rejected before the Runtime sees it."
+          "text": "**Command Registry** — 32 namespaced commands (`desktop.launch_app`, `input.click`, `vision.locate`…), each with a schema, risk level and required permission. The AI may only pick from this list; an invented name is rejected before the Runtime sees it."
         },
         {
           "kind": "feature",
-          "text": "**Runtime Kernel** \u2014 one entry point, five ordered gates: registry \u2192 permission \u2192 precondition \u2192 confirm \u2192 execute. Skipping a stage is not possible from outside."
+          "text": "**Runtime Kernel** — one entry point, five ordered gates: registry → permission → precondition → confirm → execute. Skipping a stage is not possible from outside."
         },
         {
           "kind": "feature",
-          "text": "**Desktop World Model** \u2014 persistent state (apps, running processes, screen geometry, last observation, action history) with explicit staleness, so AURA stops rediscovering the machine every step."
+          "text": "**Desktop World Model** — persistent state (apps, running processes, screen geometry, last observation, action history) with explicit staleness, so AURA stops rediscovering the machine every step."
         },
         {
           "kind": "feature",
-          "text": "**Desktop Knowledge Base** \u2014 WhatsApp uses Ctrl+F, Slack uses Ctrl+K, macOS close is top-LEFT. Injected as prompt hints so the model spends its judgement on *where things are*, not on rediscovering shortcuts."
+          "text": "**Desktop Knowledge Base** — WhatsApp uses Ctrl+F, Slack uses Ctrl+K, macOS close is top-LEFT. Injected as prompt hints so the model spends its judgement on *where things are*, not on rediscovering shortcuts."
         },
         {
           "kind": "feature",
-          "text": "**Developer Console** (`DEV` in the dock) \u2014 live pipeline diagram, runtime stats, world model, command availability with reasons, full event stream and logs, with filtering and pause."
+          "text": "**Developer Console** (`DEV` in the dock) — live pipeline diagram, runtime stats, world model, command availability with reasons, full event stream and logs, with filtering and pause."
         },
         {
           "kind": "fix",
-          "text": "Caught while wiring: `this.runtime` already meant LocalRuntime. The kernel is `this.kernel` \u2014 overwriting it would have silently broken the OPS panel."
+          "text": "Caught while wiring: `this.runtime` already meant LocalRuntime. The kernel is `this.kernel` — overwriting it would have silently broken the OPS panel."
         },
         {
           "kind": "note",
@@ -356,7 +508,7 @@
       "changes": [
         {
           "kind": "feature",
-          "text": "`/task <goal>` \u2014 observe \u2192 act \u2192 observe loop. Takes a fresh screenshot after every action, so it can open an app, wait for it, find a search box, type a name and continue. `/do` stays as the fast single-shot path."
+          "text": "`/task <goal>` — observe → act → observe loop. Takes a fresh screenshot after every action, so it can open an app, wait for it, find a search box, type a name and continue. `/do` stays as the fast single-shot path."
         },
         {
           "kind": "feature",
@@ -364,7 +516,7 @@
         },
         {
           "kind": "feature",
-          "text": "`/dev` page \u2014 this page. Version, release notes, and live build status."
+          "text": "`/dev` page — this page. Version, release notes, and live build status."
         },
         {
           "kind": "safety",
@@ -380,7 +532,7 @@
       "version": "0.13.0",
       "codename": "Messy JSON",
       "date": "2026-08-07",
-      "headline": "/do actually works \u2014 the parser was the bug",
+      "headline": "/do actually works — the parser was the bug",
       "changes": [
         {
           "kind": "fix",
@@ -388,7 +540,7 @@
         },
         {
           "kind": "fix",
-          "text": "`extractJson()` handled 2 of 5 realistic model replies. Rewritten as strict \u2192 repair \u2192 prose-salvage; now 9 of 9."
+          "text": "`extractJson()` handled 2 of 5 realistic model replies. Rewritten as strict → repair → prose-salvage; now 9 of 9."
         },
         {
           "kind": "feature",
@@ -396,7 +548,7 @@
         },
         {
           "kind": "feature",
-          "text": "Two-stage describe \u2192 plan fallback for weak vision models."
+          "text": "Two-stage describe → plan fallback for weak vision models."
         }
       ]
     },
@@ -416,11 +568,11 @@
         },
         {
           "kind": "feature",
-          "text": "`/do` plans directly from the screenshot instead of image \u2192 OCR \u2192 text \u2192 plan."
+          "text": "`/do` plans directly from the screenshot instead of image → OCR → text → plan."
         },
         {
           "kind": "feature",
-          "text": "Avatar height slider (60\u2013160%) in WARDROBE."
+          "text": "Avatar height slider (60–160%) in WARDROBE."
         }
       ]
     },
@@ -440,7 +592,7 @@
         },
         {
           "kind": "feature",
-          "text": "Activity trace \u2014 every model call, decision, coordinate and refusal, live."
+          "text": "Activity trace — every model call, decision, coordinate and refusal, live."
         },
         {
           "kind": "feature",
@@ -456,7 +608,7 @@
       "changes": [
         {
           "kind": "feature",
-          "text": "`/watch` \u2014 share a tab, window or screen and ask about it."
+          "text": "`/watch` — share a tab, window or screen and ask about it."
         },
         {
           "kind": "feature",
@@ -469,5 +621,5 @@
       ]
     }
   ],
-  "headline": "Runtime-centric architecture"
+  "headline": "The full working handbook for the project — 14 guides, verified against the code."
 }
