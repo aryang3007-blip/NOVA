@@ -52,6 +52,7 @@ import { FOLLOWUP_WINDOW_MS, REARM_DELAY_MS, shouldRearmCommander, followupOpen 
 import { openFeature } from './features/launcher.js';
 import { parseFeatureIntent } from './features/intent.js';
 import { parseDeviceVoiceIntent } from './ai/device-router.js';
+import { interpretSpokenCommand, parseLiveNav } from './voice/command-interpreter.js';
 import { InteractionManager, DWELL_EV } from './vision/interaction-manager.js';
 import { TraceView } from './ui/trace-view.js';
 
@@ -3317,10 +3318,16 @@ class AuraApp {
   }
 
   /**
-   * Route a direct request into a feature popup (pptx/docx/xlsx/research)
-   * if it is one. Returns true when handled. Typed + wake + STT all funnel
-   * through this one function — the "same call anywhere" rule. The phrasing
-   * rules live in js/features/intent.js (unit-tested, no duplication).
+   * ONE intent router for every input path — typed, wake word, STT final.
+   * Order matters (most specific first):
+   *   1. feature popup     — "make a ppt on X"          → PPT Builder
+   *   2. device voice      — "open youtube on my phone" → canonical /devices
+   *   3. spoken command    — "timer 5 minutes", "theme crimson", "open
+   *                          whatsapp", "mute yourself"... → the SAME slash
+   *                          command as typing it (works on offline core)
+   *   4. everything else   → conversation (the model / local core)
+   * Nothing here bypasses a safety gate: commands run through plugins.run,
+   * exactly like typed input. Returns true when handled.
    */
   maybeFeatureIntent(text) {
     const f = parseFeatureIntent(text);
@@ -3328,12 +3335,31 @@ class AuraApp {
       this.openFeaturePopup(f.kind, f.prefill);
       return true;
     }
-    // Voice follow-up / natural-language device commands: "open youtube on my
-    // phone", "find my phone", "what's my phone battery" — same canonical
-    // /devices path as typing it, so it works on the offline core with no
-    // model call. parseDeviceVoiceIntent is deliberately conservative; a
-    // non-match returns false and the reply goes to the model as before.
     if (this.maybeDeviceIntent(text)) return true;
+
+    // "open the live screen" (optionally "…and <task>") → navigate to /screen
+    // with the task preloaded; the live page auto-runs it (armed gates intact).
+    const nav = parseLiveNav(text);
+    if (nav) {
+      if (config.get('auraLiveEnabled') === false) {
+        this.pushSystemMessage('AURA Live is switched OFF in Master Controls — re-enable it there to open it.');
+        return true;
+      }
+      window.location.href = `/screen${nav.prompt ? `?prompt=${encodeURIComponent(nav.prompt)}` : ''}`;
+      return true;
+    }
+
+    const cmd = interpretSpokenCommand(text);
+    if (cmd) {
+      // Natural language → slash command, executed through the registry the
+      // same way typing it would be (engine's slash path bypasses the model,
+      // so this is still a deterministic route). The result lands in the
+      // transcript and is spoken by incremental TTS, so voice is answered
+      // by voice.
+      this.pushSystemMessage(`🗣 understood — running \`${cmd}\``);
+      this.ai.send(cmd);
+      return true;
+    }
     return false;
   }
 

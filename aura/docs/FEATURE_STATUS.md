@@ -90,6 +90,8 @@ Legend: 🟢 Working · 🟡 Partial (works with a stated caveat) · ⚪ Planned
 | Incremental speech | 🟢 Working | Speaks each sentence as it streams — starts talking before generation finishes |
 | Viseme generation | 🟢 Working | Grapheme→viseme mapping, timing verified (4 visemes summing to exactly 500 ms) |
 | Wake word | 🟢 Working | Continuous recognition scanning for the trigger word; enable in Settings → Voice. Same browser caveat as STT |
+| Spoken commands | 🟢 Working | Wake word + command → deterministic slash command (`timer five minutes` → `/timer 300`); same router for typed and spoken; 68 interpreter assertions; device/phone phrases stay with the device router |
+| /screen by voice | 🟢 Working | `/screen` omni bar (⌘ + key or 🎙 mic) auto-classifies a prompt: ask / find / act (agent loop starts automatically, arm + per-step confirm unchanged) / share / stop / arm automation. "open the live screen and <task>" navigates there with the task preloaded |
 | Voice selection | 🟢 Working | `/voices` lists them; picker in Settings |
 
 **Caveat:** browsers expose no phoneme-timing API. Lip-sync is derived from real word-boundary events plus grapheme mapping — genuine text-driven sync, not random mouth flapping, but not phoneme-perfect.

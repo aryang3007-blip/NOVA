@@ -223,6 +223,37 @@ runtime.desktop.actions.registerPlugin({
 
 Every action passes through: **schema validation → permission check → rate limit → confirmation gate → audit log**. There is no path to the OS that skips this.
 
+### Voice command interpreter
+
+"Wake word → message → it does what you say" is one deterministic router, not
+a model prompt:
+
+```js
+import { interpretSpokenCommand } from './voice/command-interpreter.js';
+interpretSpokenCommand('set a timer for 5 minutes'); // → '/timer 300 Timer'
+interpretSpokenCommand('open whatsapp');             // → '/open whatsapp'
+interpretSpokenCommand('what is my name');           // → null (conversation)
+```
+
+- **Same call anywhere.** Typed, wake-word, and STT input all funnel through
+  `main.js → maybeFeatureIntent()`, so a spoken command executes exactly like
+  typing the slash command — no model, no offline drift (`61` assertions in
+  `tests/test-command-interpreter.mjs`).
+- **Conservative by design.** Only high-precision patterns match; questions
+  and greetings return `null` and go to the AI. New phrases should be added
+  with a test in the same file.
+- **Device phrases are off-limits.** Anything mentioning phone/mobile/device
+  returns `null` so `js/ai/device-router.js` keeps owning them
+  (`open youtube on my phone` → `/devices open youtube`).
+- **`/screen` (AURA Live) auto-classifies prompts** with
+  `classifyLivePrompt()`: screen questions → ASK, "find X" → FIND,
+  "open gmail" → ACT (agent loop starts automatically — arm + per-step
+  confirm gates still run inside `runAct()`), "share my screen" → LIVE,
+  "arm the automation" → arm card. The omni bar and the 🎙 mic call the
+  same `handleOmniPrompt()`.
+- **Safety is unchanged.** Interpreter output is just a slash command; it
+  travels the same registry, permission, and confirmation gates as typing.
+
 ### Rebinding a gesture
 
 ```js

@@ -177,6 +177,17 @@ kbd {
   font-family: var(--mono); font-size: 9.5px; color: var(--faint);
   border: 1px solid var(--edge); border-radius: 6px; padding: 2px 6px;
 }
+#omni-mic {
+  background: transparent; border: 1px solid var(--edge); border-radius: 10px;
+  color: var(--dim); font-size: 13px; line-height: 1; padding: 4px 7px;
+  cursor: pointer; transition: all .25s var(--ease);
+}
+#omni-mic:disabled { opacity: .35; cursor: not-allowed; }
+#omni-mic:not(:disabled):hover { border-color: var(--cy); color: var(--ink); }
+#omni-mic.live {
+  border-color: var(--cy); color: var(--ink);
+  box-shadow: 0 0 18px -6px var(--cy);
+}
 
 .pillbar { display: flex; gap: 7px; }
 .pill {

@@ -27,6 +27,9 @@ import { ScreenAgent } from './ai/screen-agent.js';
 import { TaskAgent } from './ai/task-agent.js';
 import { AIEngine } from './ai/engine.js';
 import { localActions } from './actions/local-actions.js';
+import { classifyLivePrompt } from './voice/command-interpreter.js';
+import { SpeechInput } from './voice/speech.js';
+import { bus, EV } from './core/bus.js';
 import { Trace } from './core/trace.js';
 import { TraceView } from './ui/trace-view.js';
 import { config } from './core/config.js';
@@ -48,6 +51,7 @@ const app = {
   ai: null, agent: null, cursor: null, traceView: null,
   actMode: 'do', previewTimer: null, frames: 0, spark: [],
   reticleColor: RETICLE_COLORS[0], reticleStyle: 'reticle',
+  voiceInput: null,
 };
 
 /* ── boot ───────────────────────────────────────────────────────────── */
@@ -91,7 +95,15 @@ async function init() {
   });
   app.traceView = new TraceView($('trace-log'));
 
-  wireLive(); wireAsk(); wireFind(); wireAct(); wireDesktops(); wireSettings(); wireOmni();
+  wireLive(); wireAsk(); wireFind(); wireAct(); wireDesktops(); wireSettings(); wireOmni(); wireVoice();
+
+  // Preloaded prompt from the main app: "open the live screen and <task>".
+  const preload = new URLSearchParams(location.search).get('prompt');
+  if (preload) {
+    history.replaceState(null, '', '/screen');
+    $('omni').value = preload;
+    handleOmniPrompt(preload);
+  }
   await refreshAll();
   setInterval(refreshStatus, 4000);
 }
@@ -648,19 +660,99 @@ function wireOmni() {
     const v = $('omni').value.trim();
     if (!v) return;
     $('omni').value = '';
-    const map = { '/watch': 'live', '/find': 'find', '/do': 'act', '/task': 'act',
-                  '/reticle': 'live', '/desktop': 'desktop', '/screenmode': 'ask' };
-    const cmd = v.split(/\s+/)[0].toLowerCase();
-    if (map[cmd]) {
-      show(map[cmd]);
-      const rest = v.slice(cmd.length).trim();
-      if (rest && map[cmd] === 'find') { $('find-q').value = rest; runFind(); }
-      else if (rest && map[cmd] === 'act') { $('act-q').value = rest; }
-      return;
+    await handleOmniPrompt(v);
+  });
+}
+
+/**
+ * One prompt entry point for the live page — typed (omni ↵) AND spoken
+ * (mic STT final) call the SAME function, so "/screen does what you say"
+ * is identical either way. Slash commands keep their existing map; plain
+ * language is classified (ask / find / act / live / command) and RUN.
+ */
+async function handleOmniPrompt(v) {
+  const map = { '/watch': 'live', '/find': 'find', '/do': 'act', '/task': 'act',
+                '/reticle': 'live', '/desktop': 'desktop', '/screenmode': 'ask' };
+  const cmd = v.split(/\s+/)[0].toLowerCase();
+  if (map[cmd]) {
+    show(map[cmd]);
+    const rest = v.slice(cmd.length).trim();
+    if (rest && map[cmd] === 'find') { $('find-q').value = rest; runFind(); }
+    else if (rest && map[cmd] === 'act') {
+      $('act-q').value = rest;
+      // Auto-start — arm + per-step confirm gates still run inside runAct().
+      runAct();
     }
-    show('ask');
-    $('ask-q').value = v;
-    runAsk();
+    return;
+  }
+
+  const intent = classifyLivePrompt(v);
+  if (intent?.kind === 'live') {
+    show('live');
+    if (intent.action === 'stop') {
+      screenShare.stop(); stopPreview(); await refreshStatus();
+      toast('ok', 'Sharing stopped.');
+    } else {
+      const r = await screenShare.start();
+      toast(r.ok ? 'ok' : 'warn', r.message);
+      if (r.ok) startPreview();
+      await refreshStatus();
+    }
+    return;
+  }
+  if (intent?.kind === 'command') {
+    const q = intent.query;
+    if (/^\/automation\s+(arm|on)$/i.test(q)) {
+      const r = await localActions.automationArm();
+      toast(r.ok ? 'ok' : 'bad', r.message); refreshStatus(); return;
+    }
+    if (/^\/automation\s+(disarm|off)$/i.test(q)) {
+      const r = await localActions.automationDisarm();
+      toast('ok', r.message || 'Disarmed.'); refreshStatus(); return;
+    }
+    // Unknown slash on this page → ask view (agent chat).
+  }
+  if (intent?.kind === 'find') {
+    show('find');
+    $('find-q').value = intent.query;
+    runFind();
+    return;
+  }
+  if (intent?.kind === 'act') {
+    show('act');
+    app.actMode = intent.mode === 'do' ? 'do' : 'task';
+    $$('#act-seg button').forEach(x => x.classList.toggle('on', x.dataset.act === app.actMode));
+    $('act-mode').textContent = app.actMode === 'task' ? 'agent loop' : 'single step';
+    $('act-q').value = intent.query;
+    // Auto-start the loop — arm + per-step confirm gates still run inside
+    // runAct(), so a not-armed bot refuses instead of acting.
+    runAct();
+    return;
+  }
+
+  show('ask');
+  $('ask-q').value = v;
+  runAsk();
+}
+
+/* ── voice on /screen ────────────────────────────────────────────────── */
+function wireVoice() {
+  const btn = $('omni-mic');
+  if (!btn) return;
+  app.voiceInput = new SpeechInput();
+  if (!app.voiceInput.supported) {
+    btn.title = 'Speech recognition unsupported here — use Chrome/Edge/Safari.';
+    return;
+  }
+  btn.disabled = false;
+  btn.addEventListener('click', () => app.voiceInput.toggle('command'));
+  // Same shared SpeechInput bus the main app uses → echo suppression,
+  // half-duplex mute and restart-storm guard all apply for free.
+  bus.on(EV.STT_START, () => btn.classList.add('live'));
+  bus.on(EV.STT_END, () => btn.classList.remove('live'));
+  bus.on(EV.STT_FINAL, ({ text }) => {
+    const t = String(text || '').trim();
+    if (t) handleOmniPrompt(t);
   });
 }
 
