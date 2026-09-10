@@ -149,9 +149,11 @@ try:
             return json.loads(urllib.request.urlopen(req, timeout=5).read())
 
         r1 = call_policy()
-        chk("get_policy returns a policy", r1.get("policy") in ("ask", "strict", "open"),
+        chk("get_policy returns a policy", r1.get("policy") in ("ask", "strict"),
             str(r1.get("policy")))
-        chk("get_policy offers three options", len(r1.get("options", [])) == 3)
+        chk("get_policy offers two options (open removed)", len(r1.get("options", [])) == 2)
+        chk("get_policy options are exactly ask+strict",
+            sorted(o.get("id") for o in r1.get("options", [])) == ["ask", "strict"])
 
         t0 = time.time()
         for _ in range(20):

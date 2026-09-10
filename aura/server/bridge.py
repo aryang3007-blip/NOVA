@@ -240,11 +240,12 @@ DESTRUCTIVE_PATTERNS = [
     r"\bc:\\?\s*$", r"^\s*/\s*$",              # bare drive/root targets
 ]
 
-# CATASTROPHIC commands: refused under BOTH 'ask' and 'strict'. Only the
-# fully-explicit 'open' policy can run them. Rationale: "ask before harmful"
-# must never mean "one mis-click (or one convincing agent narration) erases
-# the disk / kills the machine / opens the registry". Below this line, no
-# confirmation exists that makes the blast radius acceptable.
+# CATASTROPHIC commands: refused under EVERY policy, with no override.
+# Rationale: "ask before harmful" must never mean "one mis-click (or one
+# convincing agent narration) erases the disk / kills the machine / opens
+# the registry". Below this line, no confirmation exists that makes the
+# blast radius acceptable. An 'open' bypass policy used to exist; it was
+# removed — an autonomous agent must never reach these through AURA.
 CATASTROPHIC_PATTERNS = [
     # Disk erasure / repartition / secure-wipe
     r"\bformat\b", r"\bmkfs\b", r"\bdd\b", r"\bfdisk\b", r"\bdiskpart\b",
@@ -280,14 +281,14 @@ SHELL_META = re.compile(r"[;&|`$><\n\r]|\$\(|&&|\|\|")
 #            the one exception: refused outright, no confirmation possible.
 #   'strict' the original behaviour — destructive verbs are refused outright
 #            and cannot be confirmed. Choose this if AURA is unattended.
-#   'open'   everything runs with no confirmation. You are on your own; the
-#            UI makes you type CONFIRM before this can be selected.
 #
+# There is deliberately no bypass mode: catastrophic commands are refused
+# under every policy and destructive commands always confirm-or-block.
 # Whatever the policy, commands are still argv arrays with shell=False, and
 # shell metacharacters are still rejected — that is injection protection, not
 # a policy choice, so it is never disabled.
 TERMINAL_POLICY = "ask"
-VALID_POLICIES = ("ask", "strict", "open")
+VALID_POLICIES = ("ask", "strict")
 
 
 def set_policy(name):
@@ -312,9 +313,6 @@ def get_policy():
             {"id": "strict", "label": "Block destructive commands entirely",
              "detail": "Destructive commands (format, del /f, diskpart, shutdown…) are "
                        "refused and cannot be confirmed. Safest for unattended use."},
-            {"id": "open", "label": "Run everything without asking",
-             "detail": "No confirmation at all. Injection protection still applies. "
-                       "Only pick this if you fully trust every command."},
         ],
     }
 
@@ -383,22 +381,21 @@ def _classify_command(cmdline, policy=None):
     is_risky_sub = bool(deny and len(argv) > 1 and argv[1].lower() in deny)
     is_safe = prog in SAFE_COMMANDS and not is_risky_sub and not is_destructive
 
-    if pol == "open":
-        return {"allowed": True, "needs_confirm": False, "argv": argv,
-                "danger": explain_command(argv) if is_destructive else None,
-                "reason": "Policy is 'open' — running without confirmation."}
+    # Unknown/legacy policy values fail closed to 'ask' semantics (confirm
+    # destructive, refuse catastrophic) instead of failing open.
+    if pol not in ("ask", "strict"):
+        pol = "ask"
 
-    # Hard stop underneath every policy except an explicit 'open'. This is
-    # the guarantee that an agent loop — however persuasive its plan — can
-    # never reach disk erasure, power kills, registry edits or account
-    # tampering through AURA.
+    # Hard stop underneath every policy. This is the guarantee that an agent
+    # loop — however persuasive its plan — can never reach disk erasure,
+    # power kills, registry edits or account tampering through AURA.
     if is_catastrophic:
         return {"allowed": False, "needs_confirm": False, "argv": argv,
                 "danger": explain_command(argv),
                 "reason": ("Hard-blocked for safety: this command can erase a disk, "
                            "shut the machine down, edit the registry/boot config or "
                            "tamper with accounts — no confirmation makes that safe, so "
-                           "AURA refuses it under every policy except an explicit 'open'. "
+                           "AURA refuses it under every policy, with no override. "
                            f"What it tried to do: {explain_command(argv)}")}
 
     if pol == "strict" and is_destructive:

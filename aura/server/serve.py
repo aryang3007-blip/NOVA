@@ -610,13 +610,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 return self._json({"ok": False, "message": f"Database error: {e}"}, 500)
 
-        # ── /api/voice/status (POST) — Telemetry from Python voice service
+        # ── /api/voice/status (POST) — Telemetry MERGE (never replace).
+        # Two writers share this dict: the Python voice service (detection
+        # state, heartbeat) and the browser (speaking flag from TTS). A
+        # wholesale replace by either would wipe the other's keys, so POSTs
+        # merge top-level keys into the stored dict.
         if path == "/api/voice/status":
 
             body = self._read_body()
             try:
                 p = json.loads(body or b"{}")
-                setattr(self.server, "_wake_status", p)
+                cur = getattr(self.server, "_wake_status", None)
+                if not isinstance(cur, dict):
+                    cur = {}
+                cur.update(p if isinstance(p, dict) else {})
+                setattr(self.server, "_wake_status", cur)
                 return self._json({"ok": True})
             except Exception:
                 return self._json({"ok": False}, 400)

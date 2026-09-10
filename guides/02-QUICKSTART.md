@@ -12,6 +12,7 @@
   - `pyautogui` — desktop input automation (high risk, off by default)
   - `python-pptx`, `openpyxl`, `python-docx` — document generation
   - `qrcode` — QR pairing
+  - `numpy`, `pyaudio`, `faster-whisper`, `openwakeword` — always-on wake word (Python voice service)
 
 ## Launch
 
@@ -25,6 +26,25 @@ python server/serve.py --ollama http://localhost:11434
 ```
 
 Opens `http://localhost:8000` automatically.
+
+On Windows, double-click `AURA.bat` in the repo root instead: it picks a
+free port, starts the server, and opens the voice service in a second
+window when the mic stack is installed.
+
+### Wake word (Python voice service, optional)
+
+Second terminal — the service owns the mic and posts detections to the server:
+
+```bash
+cd aura
+python voice/wake_service.py                  # needs numpy + pyaudio + faster-whisper
+python voice/wake_service.py --list-devices   # pick a mic
+python voice/wake_service.py --server http://localhost:8080/api/voice/wake
+```
+
+Then Settings → Voice → Wake engine → "Python voice service".
+The browser probes `/api/voice/status` and falls back to built-in scanning
+when the service isn't running — nothing pretends.
 
 ### Flags (parsed manually in `serve.py`)
 

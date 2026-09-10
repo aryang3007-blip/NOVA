@@ -36,6 +36,14 @@
  *   When engine === 'browser' or Porcupine fails to load, falls back to
  *   the existing SpeechInput wake-word scanning. Both paths emit the same
  *   EV.WAKE_WORD event, so the rest of main.js is unchanged.
+ *
+ * PYTHON DELEGATION
+ * ─────────────────
+ *   When engine === 'python', the local Python voice service owns the mic
+ *   and this class only polls /api/voice/events (see
+ *   startLocalServiceListener) plus probePythonService() for liveness.
+ *   decideWakeEngine() below is the single routing truth table shared by
+ *   main.js and the tests.
  */
 
 import { bus, EV } from '../core/bus.js';
@@ -84,6 +92,9 @@ export class WakeWordEngine {
     this._bufferIdx = 0;
     this._sampleRatio = 1;   // filled when AudioContext is created
 
+    /** @type {boolean} True while wake is delegated to the Python service. */
+    this._pythonMode = false;
+
     // Start background event listener for Python local wake service
     this.startLocalServiceListener();
   }
@@ -122,6 +133,50 @@ export class WakeWordEngine {
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
+
+  /** True while wake is delegated to the Python voice service. */
+  get pythonActive() { return this._pythonMode === true; }
+
+  /**
+   * Mark delegation to / from the Python voice service.
+   * Python owns the mic in this mode, so entering it pauses any
+   * Porcupine listening; leaving it just clears the flag.
+   */
+  setPythonMode(on) {
+    this._pythonMode = !!on;
+    if (on) this.pause().catch(() => {});
+    return this._pythonMode;
+  }
+
+  /**
+   * Probe the Python voice service via GET /api/voice/status.
+   * Resolves true ONLY on a fresh service heartbeat: the reply must carry
+   * the service version stamp + a recent updated_at + a non-error lifecycle
+   * state. The server's built-in placeholder status (no service running)
+   * has no version stamp, so it honestly reads as "not live".
+   * Never throws — false means "fall back to another engine".
+   */
+  async probePythonService(timeoutMs = 2500) {
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), timeoutMs);
+      try {
+        const resp = await fetch('/api/voice/status', { cache: 'no-store', signal: ctl.signal });
+        if (!resp || !resp.ok) return false;
+        const data = await resp.json();
+        const v = data && data.voice;
+        if (!v || typeof v.version !== 'string' || !v.version) return false;
+        if (typeof v.updated_at !== 'number') return false;
+        if (Date.now() / 1000 - v.updated_at > 60) return false; // stale: 4+ missed beats
+        if (/ERROR|OFF|STOPPED|UNAVAILABLE/.test(String(v.status || ''))) return false;
+        return true;
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      return false;
+    }
+  }
 
   /** True when Porcupine's WASM dependencies can run in this context. */
   static isSupported() {
@@ -387,3 +442,23 @@ export class WakeWordEngine {
 
 // Shared SDK reference across instances (loaded once, reused)
 WakeWordEngine._sdk = null;
+
+/**
+ * Single routing truth table for wake engines.
+ * main.js consults this (via live probes) before starting anything.
+ *
+ * @param {object} facts
+ * @param {string} facts.engine configured engine: 'python'|'porcupine'|'browser'|'off'
+ * @param {boolean} facts.pythonLive probePythonService() result
+ * @param {boolean} facts.hasKey Picovoice access key configured
+ * @param {boolean} facts.porcupineOk WakeWordEngine.isSupported() result
+ * @returns {'python'|'porcupine'|'browser'|'off'} the engine to actually use
+ */
+export function decideWakeEngine({ engine = 'browser', pythonLive = false, hasKey = false, porcupineOk = false } = {}) {
+  if (engine === 'off') return 'off';
+  if (engine === 'python') return pythonLive ? 'python' : 'browser';
+  if (engine === 'porcupine') return (hasKey && porcupineOk) ? 'porcupine' : 'browser';
+  return 'browser'; // 'browser' + anything unknown fails soft to scanning
+}
+
+export default WakeWordEngine;

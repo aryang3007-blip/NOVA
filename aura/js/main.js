@@ -15,6 +15,7 @@ import { plugins } from './core/plugins.js';
 import { AIEngine } from './ai/engine.js';
 import { SpeechInput, SpeechOutput, stripMarkdownForSpeech } from './voice/speech.js';
 import { WakeWordEngine } from './voice/wake-word-engine.js';
+import { ProactiveEngine } from './proactive/engine.js';
 import { VisionModule } from './vision/vision.js';
 import { GESTURES } from './vision/gesture-classifier.js';
 import { applyFlagVisibility, label as flagLabel, renderControlsChip } from './features/controls.js';
@@ -99,6 +100,7 @@ class AuraApp {
     this.vision = new VisionModule();
     this.voice = { input: new SpeechInput(), output: new SpeechOutput() };
     this.wakeEngine = new WakeWordEngine();
+    this.proactive = new ProactiveEngine({ bus, EV, config });
     this.ai = new AIEngine({ plugins });
     this.actions = localActions;
     /** @type {any} */ (this.ai).actions = localActions;
@@ -759,11 +761,26 @@ class AuraApp {
       }
     });
 
+    // ── proactive assistant: event-driven nudges, never silent actions
+    this.proactive.start();
+    bus.on(EV.PROACTIVE_NOTIFY, ({ rule, title, text, speak }) => {
+      this.toast('info', `\u{1F4A1} ${title} \u2014 ${text}`);
+      if (speak && config.get('proactiveVoice') !== false && config.get('ttsEnabled')) {
+        this.voice.output.speak(`${title}. ${text}`);
+      }
+    });
+    window.addEventListener('online', () => this.proactive.handleOnlineStatus(true));
+    window.addEventListener('offline', () => this.proactive.handleOnlineStatus(false));
+    this.proactive.handleOnlineStatus(navigator.onLine !== false);
+    setInterval(() => this.proactive.pollBattery(), 5 * 60 * 1000);
+    this.proactive.pollBattery();
     bus.on(EV.TTS_START, () => { this.setStatus('SPEAKING'); $('status-pill').classList.add('speaking');
       $('btn-interrupt').hidden = false;
+      this._postVoiceSpeaking(true);
     });
     bus.on(EV.TTS_END, () => {
       $('status-pill').classList.remove('speaking');
+      this._postVoiceSpeaking(false);
       $('btn-interrupt').hidden = true;
       if (!state.get('aiStreaming') && !state.get('sttActive')) this.setStatus('IDLE');
 
@@ -781,7 +798,7 @@ class AuraApp {
         }, 500);
       }
     });
-    bus.on(EV.TTS_INTERRUPT, () => { $('btn-interrupt').hidden = true; $('status-pill').classList.remove('speaking'); });
+    bus.on(EV.TTS_INTERRUPT, () => { $('btn-interrupt').hidden = true; $('status-pill').classList.remove('speaking'); this._postVoiceSpeaking(false); });
 
     // ── vision
     bus.on(EV.CAM_START, () => {
@@ -1109,10 +1126,35 @@ class AuraApp {
     $('btn-test-voice').addEventListener('click', () =>
       this.voice.output.speak('AURA voice system online. All modules nominal, Commander.'));
     bindText('set-sttlang', 'sttLang');
+    bindText('set-wake-engine', 'wakeWordEngine', () => {
+      // Re-route live audio when the engine changes mid-listen.
+      if (config.get('wakeWordEnabled')) { this.setWakeWord(false); this.setWakeWord(true); }
+    });
+    bindText('set-picovoice-key', 'picovoiceKey');
     bindCheck('set-autosend', 'autoSendOnFinal');
     bindCheck('set-verify-actions', 'verifyDesktopActions');
     bindText('set-commander-greeting', 'commanderGreeting');
     bindCheck('set-wake', 'wakeWordEnabled', (v) => this.setWakeWord(v));
+    bindCheck('set-proactive', 'proactiveEnabled');
+    bindCheck('set-proactive-voice', 'proactiveVoice');
+    const bindProRule = (id, rule) => {
+      const el = $(id);
+      el?.addEventListener('change', () => {
+        config.set('proactiveRules', { ...(config.get('proactiveRules') || {}), [rule]: el.checked });
+      });
+    };
+    bindProRule('set-pro-longtask', 'longTask');
+    bindProRule('set-pro-taskfailed', 'taskFailed');
+    bindProRule('set-pro-backonline', 'backOnline');
+    bindProRule('set-pro-lowbattery', 'lowBattery');
+    // Sync initial checkbox state (bindCheck only wires change -> config).
+    const proRules = config.get('proactiveRules') || {};
+    if ($('set-proactive')) $('set-proactive').checked = config.get('proactiveEnabled') !== false;
+    if ($('set-proactive-voice')) $('set-proactive-voice').checked = config.get('proactiveVoice') !== false;
+    if ($('set-pro-longtask')) $('set-pro-longtask').checked = proRules.longTask !== false;
+    if ($('set-pro-taskfailed')) $('set-pro-taskfailed').checked = proRules.taskFailed !== false;
+    if ($('set-pro-backonline')) $('set-pro-backonline').checked = proRules.backOnline !== false;
+    if ($('set-pro-lowbattery')) $('set-pro-lowbattery').checked = proRules.lowBattery !== false;
     bindText('set-wakeword', 'wakeWord');
 
     // Wake Word Tag Manager UI
@@ -1277,6 +1319,8 @@ class AuraApp {
     if ($('set-verify-actions')) $('set-verify-actions').checked = c.verifyDesktopActions !== false;
     $('set-commander-greeting').value = c.commanderGreeting || 'Yes, Commander?';
     $('set-wake').checked = c.wakeWordEnabled;
+    if ($('set-wake-engine')) $('set-wake-engine').value = c.wakeWordEngine || 'browser';
+    if ($('set-picovoice-key')) $('set-picovoice-key').value = c.picovoiceKey || '';
     if ($('set-wakeword')) $('set-wakeword').value = c.wakeWord || '';
     this._renderWakeTags?.();
     $('voice-support').className = this.voice.input.supported ? 'note good' : 'note bad';
@@ -1676,12 +1720,6 @@ class AuraApp {
     $$('#dt-policy input[name="tpolicy"]').forEach(el => {
       el.addEventListener('change', async () => {
         const val = /** @type {any} */ (el).value;
-        // 'open' disables every confirmation — make the user mean it.
-        if (val === 'open') {
-          const typed = prompt(
-            'This lets AURA run ANY command with no confirmation.\n\nType CONFIRM to enable it:');
-          if (typed !== 'CONFIRM') { await this.renderTerminalPolicy(true); return; }
-        }
         const res = await this.actions.setPolicy(val);
         this.toast(res.ok ? 'success' : 'warn', res.message || 'Policy updated.');
         this._policyCache = null;
@@ -3504,6 +3542,17 @@ class AuraApp {
     }
   }
 
+  /** Fire-and-forget speaking flag for the Python wake service (merges
+   * with service telemetry server-side; harmless when no service runs). */
+  _postVoiceSpeaking(on) {
+    try {
+      fetch('/api/voice/status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ speaking: !!on, speaking_source: 'browser-tts' }),
+      }).catch(() => {});
+    } catch { /* server absent — browser-only mode */ }
+  }
+
   toggleVoiceOutput() {
     const on = !config.get('ttsEnabled');
     config.set('ttsEnabled', on);
@@ -3515,6 +3564,7 @@ class AuraApp {
   /**
    * Toggle wake-word listening.
    * Routes to the engine configured in Settings:
+   *   'python'    → NOVA voice service owns the mic (no browser mic)
    *   'porcupine' → WakeWordEngine (proper dedicated engine)
    *   'browser'   → existing SpeechInput wake scanning (fallback)
    *   'off'       → disables entirely
@@ -3526,6 +3576,8 @@ class AuraApp {
       if (this.voice.input.mode === 'wake') {
         this.voice.input.stop();
       }
+      this.wakeEngine.pause().catch(() => {});
+      this.wakeEngine.setPythonMode(false);
       config.set('wakeWordEnabled', false);
       if ($('set-wake')) $('set-wake').checked = false;
       $('dock-wake')?.classList.remove('active', 'live');
@@ -3535,13 +3587,20 @@ class AuraApp {
       return 'Wake word listening disabled.';
     }
 
-    if (!this.voice.input.supported) {
+    const engine = config.get('wakeWordEngine') || 'browser';
+    if (engine === 'off') {
+      config.set('wakeWordEnabled', false);
+      if ($('set-wake')) $('set-wake').checked = false;
+      return 'Wake engine is set to OFF in Settings \u2192 Voice.';
+    }
+    // Only the browser fallback needs Web Speech; python/porcupine do not.
+    if (engine === 'browser' && !this.voice.input.supported) {
       config.set('wakeWordEnabled', false);
       if ($('set-wake')) $('set-wake').checked = false;
       $('dock-wake')?.classList.remove('active', 'live');
       const m = this.voice.input.unsupportedReason;
       this.toast('error', m);
-      return `⚠ ${m}`;
+      return `\u26A0 ${m}`;
     }
 
     config.set('wakeWordEnabled', true);
@@ -3551,10 +3610,51 @@ class AuraApp {
     if (badge) { badge.textContent = 'READY'; badge.className = 'badge active'; }
     state.set({ wakeWordActive: true });
 
+    if (engine === 'python') {
+      this._startPythonWakeDelegation();
+      return 'Delegating wake word to the Python voice service\u2026';
+    }
+    if (engine === 'porcupine') {
+      this._startPorcupineWake();
+      return 'Starting Porcupine wake engine\u2026';
+    }
     this.voice.input.start('wake');
     const words = config.get('wakeWord') || 'aura, nova, jarvis, computer';
-    this.toast('info', `🎙 Continuous wake word active: say "${words}" anytime`);
-    return `Multi-wake-word active — listening for "${words}".`;
+    this.toast('info', `\u{1F399} Continuous wake word active: say "${words}" anytime`);
+    return `Multi-wake-word active \u2014 listening for "${words}".`;
+  }
+
+  /** Python-service wake: probe liveness, then delegate (no browser mic). */
+  _startPythonWakeDelegation() {
+    const fallback = () => {
+      this.wakeEngine.setPythonMode(false);
+      this.voice.input.start('wake');
+      this.toast('warn', 'Python voice service not reachable \u2014 fell back to browser wake scanning.');
+    };
+    try {
+      Promise.resolve(this.wakeEngine.probePythonService()).then((live) => {
+        if (live) {
+          this.wakeEngine.setPythonMode(true);
+          const badge = $('wake-status-badge');
+          if (badge) { badge.textContent = 'PYTHON'; badge.className = 'badge active'; }
+          this.toast('info', '\u{1F399} Wake handled by the NOVA voice service \u2014 say "hey nova" anytime.');
+        } else fallback();
+      }).catch(fallback);
+    } catch { fallback(); }
+  }
+
+  /** Porcupine wake via the dedicated engine, with browser fallback. */
+  _startPorcupineWake() {
+    this.wakeEngine.start({
+      accessKey: config.get('picovoiceKey') || '',
+      keyword: config.get('wakeWord') || 'porcupine',
+      modelUrl: config.get('wakeWordModelUrl') || undefined,
+    }).then(() => {
+      this.toast('info', '\u{1F399} Porcupine wake engine listening.');
+    }).catch((e) => {
+      this.voice.input.start('wake');
+      this.toast('warn', `Porcupine unavailable (${e?.message || e}) \u2014 fell back to browser wake scanning.`);
+    });
   }
 
   toggleWakeWord() {

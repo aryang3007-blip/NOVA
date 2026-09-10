@@ -12,6 +12,7 @@
  *   node tests/test-doc-resilience.mjs
  */
 import * as router from '../js/ai/router.js';
+import { PPT_OUTLINE_MODEL } from '../js/core/model-pins.js';
 import * as docAgent from '../js/ai/doc-agent.js';
 import { ollama } from '../js/ai/providers.js';
 import { config } from '../js/core/config.js';
@@ -172,7 +173,7 @@ S('completeJSON — BUDGET ESCALATION + ONE PRECONFIGURED MODEL PIN');
   const r = await router.completeJSON({
     messages: [{ role: 'user', content: 'x' }],
     maxTokens: 8192, retries: 1, streamFn: truncStream,
-    provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
+    provider: 'gemini', model: PPT_OUTLINE_MODEL,
   });
   ok('docgen pin leads with gemini even though chat is openai',
      !r.ok && seen.length === 2 && seen.every(s => s.model === 'gemini-3.8-flash'),
@@ -187,7 +188,7 @@ S('completeJSON — BUDGET ESCALATION + ONE PRECONFIGURED MODEL PIN');
   const stream2 = async function* () { yield '{"ok":true}'; };
   const r2 = await router.completeJSON({
     messages: [{ role: 'user', content: 'x' }], streamFn: stream2, retries: 0,
-    provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
+    provider: 'gemini', model: PPT_OUTLINE_MODEL,
   });
   ok('missing pinned key → ladder runs and reports who did',
      r2.ok && r2.provider === 'openrouter', `${r2.provider}/${r2.via}`);

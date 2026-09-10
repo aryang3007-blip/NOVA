@@ -221,6 +221,13 @@ export class TaskAgent {
 
   _end(ok, message) {
     this.state = ok ? 'COMPLETED' : 'FAILED';
+    // Outcome broadcast: the proactive engine (and any UI) can now tell a
+    // finished task from a failed one. Previously only the silent return
+    // value carried this — nothing on the bus did.
+    bus.emit(EV.AGENT_STATE, {
+      state: ok ? 'succeeded' : 'failed',
+      taskId: this.taskId, steps: this.history.length, message,
+    });
     return { ok, taskId: this.taskId, steps: this.history.length, message, log: this.history };
   }
 

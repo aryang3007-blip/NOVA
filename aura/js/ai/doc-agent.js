@@ -39,6 +39,7 @@
  */
 
 import * as router from './router.js';
+import { PPT_OUTLINE_MODEL } from '../core/model-pins.js';
 import { config } from '../core/config.js';
 
 /**
@@ -363,7 +364,7 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
   // today (daily request budget from Keys & Spend). Never wastes a call.
   const guard = await usageGuard('outline');
   if (!guard.allowed) {
-    logUsage({ provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
+    logUsage({ provider: 'gemini', model: PPT_OUTLINE_MODEL,
                kind: 'outline', status: 'blocked', detail: guard.message });
     return { ok: false, source: 'budget', message: guard.message };
   }
@@ -381,9 +382,9 @@ export async function outline({ kind, topic, ai = null, engine = null, slides = 
   const r = await router.completeJSON({
     messages, engine: eng, streamFn, temperature: 0.45,
     maxTokens: kind === 'pptx' ? 8192 : 4096, timeoutMs, retries: 1,
-    provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,
+    provider: 'gemini', model: PPT_OUTLINE_MODEL,
   });
-  logUsage({ provider: r.provider || 'gemini', model: r.model || router.DOCGEN_OUTLINE_MODEL,
+  logUsage({ provider: r.provider || 'gemini', model: r.model || PPT_OUTLINE_MODEL,
              kind: 'outline', status: (r.ok && r.json) ? 'ok' : 'error',
              detail: (r.message || '').slice(0, 140) });
 
@@ -508,7 +509,7 @@ export async function repairDeck(spec, report, { topic, audience = '', eng = nul
   const r = await router.completeJSON({
     messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }],
     engine: eng, streamFn, temperature: 0.45, maxTokens: 2048, timeoutMs, retries: 0,
-    provider: 'gemini', model: router.DOCGEN_OUTLINE_MODEL,  // same preconfigured pin
+    provider: 'gemini', model: PPT_OUTLINE_MODEL,  // same preconfigured pin
   });
   if (!r.ok || !r.json || !Array.isArray(r.json.slides)) return null;
   try {

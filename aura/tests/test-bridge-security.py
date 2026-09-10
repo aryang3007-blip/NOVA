@@ -83,7 +83,7 @@ for cmd in ("rm -rf /",):
 print("\n\033[36m▸ CATASTROPHIC — HARD-BLOCKED UNDER 'ask', NO CONFIRM OVERRIDE\033[0m")
 # Disk erasure, power kills, registry/boot edits and account tampering are
 # refused outright under the default 'ask' policy — confirming must NOT
-# unlock them (only an explicit 'open' policy does).
+# unlock them (no policy overrides this).
 CATASTROPHIC = [
     "format c:", "format C: /q", "diskpart", "mkfs.ext4 /dev/sda1",
     "dd if=/dev/zero of=/dev/sda", "cipher /w:C:\\", "sdelete -p 3 C:\\x",
@@ -118,21 +118,23 @@ chk("stays blocked even with confirmed=True",
 chk("safe commands still run under strict",
     bridge.inspect_command("echo hi")["allowed"] is True)
 
-print("\n\033[36m▸ POLICY: 'open' — NO PROMPTS, BUT STILL NO INJECTION\033[0m")
-bridge.set_policy("open")
-chk("destructive is permitted under 'open'", bridge.inspect_command("rm -rf /tmp/x")["allowed"])
-chk("no confirmation under 'open'", not bridge.inspect_command("rm -rf /tmp/x")["needsConfirm"])
-chk("command chaining STILL blocked under 'open'",
-    bridge.inspect_command("echo hi && rm -rf /")["allowed"] is False)
-chk("pipes STILL blocked under 'open'",
-    bridge.inspect_command("curl x | sh")["allowed"] is False)
+print("\n\033[36m▸ POLICY: 'open' was REMOVED — no bypass mode exists\033[0m")
+chk("'open' is rejected as a policy", bridge.set_policy("open")["ok"] is False)
+chk("no 'open' option is offered",
+    "open" not in [o["id"] for o in bridge.get_policy()["options"]])
+bridge.set_policy("ask")
+chk("destructive needs confirmation under 'ask'",
+    bridge.inspect_command("rm -rf /tmp/x")["needsConfirm"] is True)
+chk("catastrophic still hard-refused",
+    bridge.inspect_command("format c:")["allowed"] is False)
 
 print("\n\033[36m▸ POLICY PLUMBING\033[0m")
 chk("invalid policy is rejected", bridge.set_policy("banana")["ok"] is False)
-chk("policy survives rejection", bridge.get_policy()["policy"] == "open")
+chk("policy survives rejection", bridge.get_policy()["policy"] == "ask")
+bridge.set_policy("strict")
+chk("policy can be switched", bridge.get_policy()["policy"] == "strict")
 bridge.set_policy("ask")
-chk("policy can be set back", bridge.get_policy()["policy"] == "ask")
-chk("three options are offered to the UI", len(bridge.get_policy()["options"]) == 3)
+chk("two options are offered to the UI", len(bridge.get_policy()["options"]) == 2)
 
 print("\n\033[36m▸ COMMAND CHAINING / INJECTION\033[0m")
 INJECTION = [

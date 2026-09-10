@@ -1,0 +1,49 @@
+{
+  "generated": "2026-09-10T21:48:08+00:00",
+  "verdict": "RED",
+  "asserts": {
+    "pass": 2326,
+    "fail": 33
+  },
+  "failed_suites": [
+    "test-screen-agent(PASS 111   FAIL 1,rc=1)",
+    "test-task-agent(PASS 50   FAIL 2,rc=1)",
+    "test-docgen(PASS 57  FAIL 1,rc=1)",
+    "test-features(NO RESULT,rc=1)",
+    "test-overlay-vdesk(PASS 33  FAIL 1,rc=1)",
+    "test-ollama-live(NO RESULT,rc=1)",
+    "test-integration(NO RESULT,rc=1)",
+    "test-command-center(NO RESULT,rc=1)",
+    "test-guide(NO RESULT,rc=1)",
+    "test-desktop-ui(NO RESULT,rc=1)",
+    "test-body(NO RESULT,rc=1)",
+    "test-new-features(NO RESULT,rc=1)",
+    "test-avatar-providers(NO RESULT,rc=1)",
+    "test-theming-memory(NO RESULT,rc=1)",
+    "test-vrm-mtoon(NO RESULT,rc=1)",
+    "test-face-recognition(NO RESULT,rc=1)",
+    "test-vision-capabilities(NO RESULT,rc=1)",
+    "test-automation-ui(NO RESULT,rc=1)",
+    "test-screen-ui(NO RESULT,rc=1)",
+    "test-screen-panel(NO RESULT,rc=1)",
+    "test-planner-height(NO RESULT,rc=1)",
+    "test-do-pipeline(NO RESULT,rc=1)",
+    "test-devconsole(NO RESULT,rc=1)",
+    "test-live-page(NO RESULT,rc=1)",
+    "test-privacy-ui(NO RESULT,rc=1)",
+    "test-owner-live(NO RESULT,rc=1)",
+    "test-phone-page(NO RESULT,rc=1)",
+    "test-dwell-ui(NO RESULT,rc=1)",
+    "test-user-bugs-v2(NO RESULT,rc=1)",
+    "test-sphere-ui(NO RESULT,rc=1)",
+    "browser-test(NO RESULT,rc=1)",
+    "find-overlaps(NO RESULT,rc=1)"
+  ],
+  "features": {
+    "wake": "service-v2 + python/porcupine/browser routing",
+    "proactive": "4-rule notify engine (toast + optional voice)",
+    "bridge": "ask/strict only (open removed)",
+    "docgen": "core-owned outline pin (L1, registry+doc-agent share)",
+    "ppt": "maintained"
+  }
+}

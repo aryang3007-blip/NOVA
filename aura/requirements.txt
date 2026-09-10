@@ -33,3 +33,14 @@ python-docx>=1.1
 # QR code for phone pairing: scan instead of typing six digits.
 # Without it the 6-digit code still works; the QR simply does not appear.
 qrcode>=7.4
+
+# Always-on wake word: the Python voice service owns the mic, confirms with
+# whisper, and posts detections to the server. Select it in the browser via
+# Settings -> Voice -> Wake engine -> "Python voice service". Without these
+# the browser falls back to built-in wake scanning and says so.
+numpy>=1.24
+pyaudio>=0.2.14
+# Windows: PyAudio wheels are often missing — pyaudiowpatch is the drop-in:
+# pip install pyaudiowpatch
+faster-whisper>=1.0
+openwakeword>=0.6

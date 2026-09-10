@@ -622,6 +622,14 @@
         <label class="field"><span>Commander Greeting</span><input id="set-commander-greeting" type="text" value="Yes, Commander?"></label>
         <label class="switch block"><input type="checkbox" id="set-wake"><span></span>Continuous Wake Word Detection <span id="wake-status-badge" class="badge" style="margin-left: 8px; font-size: 11px; padding: 2px 8px;">OFF</span></label>
         
+        <label class="field"><span>Wake engine</span>
+          <select id="set-wake-engine">
+            <option value="browser">Browser (built-in scanning)</option>
+            <option value="python">Python voice service (owns the mic)</option>
+            <option value="porcupine">Porcupine (needs access key below)</option>
+            <option value="off">Off</option>
+          </select></label>
+        <label class="field"><span>Picovoice access key</span><input id="set-picovoice-key" type="password" placeholder="Free key from console.picovoice.ai" autocomplete="off"></label>
         <div class="wakeword-manager">
           <label class="field"><span>Wake Word Presets</span>
             <select id="set-wake-presets">
@@ -642,7 +650,7 @@
           <input id="set-wakeword" type="hidden">
         </div>
         <p class="note dim">
-          <strong>Wake Word Triggers:</strong> Browser voice detection will listen continuously for any phrase tagged above. Custom wake words are saved to your configuration.
+          <strong>Wake Word Triggers:</strong> The selected wake engine listens continuously for any phrase tagged above (Porcupine uses its own built-in keywords instead). Custom wake words are saved to your configuration.
         </p>
       </div>
 
@@ -688,6 +696,15 @@
         <label class="field"><span>Ambient volume <b id="lbl-amb">0.22</b></span><input id="set-ambvol" type="range" min="0" max="1" step="0.01"></label>
         <label class="switch block"><input type="checkbox" id="set-music"><span></span>Generative background music</label>
         <label class="field"><span>Music volume <b id="lbl-mus">0.14</b></span><input id="set-musvol" type="range" min="0" max="1" step="0.01"></label>
+        <hr>
+        <hr>
+        <p class="note"><strong>Proactive assistant</strong> — NOVA notices things (long tasks finishing, failures, reconnects, low battery) and tells you. It never acts on its own.</p>
+        <label class="switch block"><input type="checkbox" id="set-proactive"><span></span>Proactive nudges</label>
+        <label class="switch block"><input type="checkbox" id="set-proactive-voice"><span></span>Speak important nudges aloud</label>
+        <label class="switch block"><input type="checkbox" id="set-pro-longtask"><span></span>Nudge: long tasks finishing</label>
+        <label class="switch block"><input type="checkbox" id="set-pro-taskfailed"><span></span>Nudge: failed tasks</label>
+        <label class="switch block"><input type="checkbox" id="set-pro-backonline"><span></span>Nudge: back online</label>
+        <label class="switch block"><input type="checkbox" id="set-pro-lowbattery"><span></span>Nudge: low battery</label>
         <hr>
         <label class="switch block"><input type="checkbox" id="set-devskipboot"><span></span>Developer Fast Boot (Instant load / skip boot screen)</label>
         <div class="btn-row">

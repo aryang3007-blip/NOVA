@@ -8,6 +8,8 @@
  * @module features/registry
  */
 
+import { PPT_OUTLINE_MODEL } from '../core/model-pins.js';
+
 export const FEATURE_MANIFEST = {
   version: 1,
   features: {
@@ -18,7 +20,7 @@ export const FEATURE_MANIFEST = {
                'animation', 'images'],
       defaults: {
         slides: 10, theme: 'professional-dark', transition: 'fade',
-        speed: 'med', animation: 'none', model: 'gemini-3.8-flash',
+        speed: 'med', animation: 'none', model: PPT_OUTLINE_MODEL,
         images: { enabled: true, count: 1, style: 'flat illustration',
                   provider: 'gemini', model: 'gemini-3.1-flash-image',
                   keyId: 'gemini-image', mode: 'smart',

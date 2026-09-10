@@ -88,6 +88,17 @@ const DEFAULTS = {
   // 'automatic' = always listen after TTS ends  |  'push-to-talk' = manual
   voiceActivation: 'push-to-talk',
 
+  // ── Proactive assistant ─────────────────────────────────────────────
+  // Event-driven nudges (never silent actions): long tasks finishing,
+  // failures worth retrying, connectivity changes, low battery. Each rule
+  // fires a toast; voice asks are spoken only when voice output is on.
+  proactiveEnabled: true,
+  proactiveVoice: true,
+  proactiveRules: { longTask: true, taskFailed: true, backOnline: true, lowBattery: true },
+  proactiveLongTaskSec: 60,     // "long" = agent ran longer than this
+  proactiveBatteryPct: 20,      // low-battery threshold
+  proactiveCooldownSec: 300,    // per-rule quiet period after firing
+
   // ── Vision ────────────────────────────────────────────────────────────
   cameraFacing: 'user',
   handTracking: true,

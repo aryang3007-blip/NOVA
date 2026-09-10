@@ -43,15 +43,6 @@ export const FALLBACK_ORDER = ['gemini', 'openrouter', 'openai', 'groq', 'anthro
 /** How many candidates to hand back before we stop escalating. */
 export const MAX_CANDIDATES = 3;
 
-/**
- * ONE preconfigured outline model for document generation (the user's
- * decision): deck/word/spreadsheet outlines are mechanical JSON and
- * gemini-3.8-flash is the newest stable model the machine is configured
- * with. Pinned for docgen ONLY; chat stays on the Settings selection.
- * Mirror: services/manifest.json features.pptx.defaults.model (parity test).
- */
-export const DOCGEN_OUTLINE_MODEL = 'gemini-3.8-flash';
-
 function keyReady(p, cfg) {
   return p && (!p.needsKey || cfg.getKey(p.id));
 }
@@ -311,5 +302,4 @@ export async function completeJSON({ messages, engine = null, temperature = 0.2,
 }
 
 export default { TASK, resolveChat, complete, completeJSON, candidateTargets,
-                 usableBackend, describeJsonFailure, FALLBACK_ORDER, MAX_CANDIDATES,
-                 DOCGEN_OUTLINE_MODEL };
+                 usableBackend, describeJsonFailure, FALLBACK_ORDER, MAX_CANDIDATES };

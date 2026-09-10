@@ -144,6 +144,7 @@ export const EV = {
   WAKE_WORD: 'voice:wake-word',
   WAKE_ENGINE_STATE: 'voice:wake-engine-state', // { state, prev, reason, engine }
   VOICE_STATE: 'voice:state',                   // full voice pipeline state broadcast
+  PROACTIVE_NOTIFY: 'assistant:proactive',     // { rule, title, text, speak }
   // vision
   CAM_START: 'vision:camera-start',
   CAM_STOP: 'vision:camera-stop',
