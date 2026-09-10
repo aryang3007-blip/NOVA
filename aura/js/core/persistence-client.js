@@ -430,6 +430,44 @@ export class PersistenceClient {
     } catch (e) {
       return { ok: false, error: String(e) };
     }
+  /* ── WAKE PHRASES ─────────────────────────────────────────────────── */
+
+  async getWakePhrases() {
+    if (!await this.isAvailable()) return [];
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/wake`, { cache: 'no-store' });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.phrases || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async saveWakePhrase(phraseObj) {
+    if (!await this.isAvailable()) return false;
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/wake`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(phraseObj),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async deleteWakePhrase(phraseId) {
+    if (!await this.isAvailable()) return false;
+    try {
+      const res = await this._fetch(`${this.baseUrl}/api/db/wake?id=${encodeURIComponent(phraseId)}`, {
+        method: 'DELETE',
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 }
 

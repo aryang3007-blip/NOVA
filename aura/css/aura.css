@@ -1424,3 +1424,29 @@ html[data-light="true"] .topbar { background: rgba(255, 255, 255, .55); }
   cursor: pointer; opacity: 0.7; font-weight: bold; padding: 0 2px;
 }
 .wakeword-tag .tag-remove:hover { opacity: 1; color: #ff6b81; }
+
+#dock-wake.active, #dock-wake.live {
+  border-color: var(--accent, #00e5ff);
+  color: var(--accent, #00e5ff);
+  background: rgba(0, 229, 255, 0.15);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.35);
+  animation: wakePulse 2.4s ease-in-out infinite;
+}
+
+@keyframes wakePulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 229, 255, 0.25); }
+  50% { box-shadow: 0 0 16px rgba(0, 229, 255, 0.55); }
+}
+
+#wake-status-badge.active {
+  background: rgba(34, 211, 238, 0.2);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+}
+
+#wake-status-badge.success {
+  background: rgba(52, 211, 153, 0.25);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+}
+

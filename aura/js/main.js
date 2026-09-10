@@ -338,6 +338,22 @@ class AuraApp {
     this.log(`Metrics: ${this.metrics.sourceLabel}`, mSrc.source === 'host' ? 'ok' : 'warn');
     await this.tick();
 
+    // ── SQLite wake phrases sync
+    try {
+      const { persistenceClient } = await import('./core/persistence-client.js');
+      const phrases = await persistenceClient.getWakePhrases();
+      if (phrases && phrases.length) {
+        state.set({ wakePhrases: phrases });
+        const enabled = phrases.filter(p => p.enabled !== false).map(p => p.phrase || p.name);
+        if (enabled.length) {
+          const cur = config.get('wakeWords') || [];
+          const combined = Array.from(new Set([...cur, ...enabled]));
+          config.set('wakeWords', combined);
+          config.set('wakeWord', combined.join(', '));
+        }
+      }
+    } catch {}
+
     this.buildUI();
     this.wireEvents();
     this.wireDOM();
@@ -602,19 +618,27 @@ class AuraApp {
     bus.on(EV.AI_MEMORY_UPDATED, ({ count }) => { $('stat-mem').textContent = count; });
 
     // ── voice
-    bus.on(EV.STT_START, () => {
+    bus.on(EV.STT_START, ({ mode } = {}) => {
       this.setStatus('LISTENING');
-      $('btn-mic').classList.add('live');
-      $('dock-mic').classList.add('live');
-      $('status-pill').classList.add('live');
-      this.audio.sfx('listen');
+      if (mode === 'wake') {
+        $('dock-wake')?.classList.add('live');
+        const badge = $('wake-status-badge');
+        if (badge) { badge.textContent = 'LISTENING'; badge.className = 'badge active'; }
+      } else {
+        $('btn-mic')?.classList.add('live');
+        $('dock-mic')?.classList.add('live');
+        $('status-pill')?.classList.add('live');
+        this.audio.sfx('listen');
+      }
     });
-    bus.on(EV.STT_END, () => {
-      $('btn-mic').classList.remove('live');
-      $('dock-mic').classList.remove('live');
-      $('status-pill').classList.remove('live');
+    bus.on(EV.STT_END, ({ mode } = {}) => {
+      if (mode !== 'wake') {
+        $('btn-mic')?.classList.remove('live');
+        $('dock-mic')?.classList.remove('live');
+        $('status-pill')?.classList.remove('live');
+      }
       $('interim').hidden = true;
-      if (!state.get('aiStreaming')) this.setStatus('IDLE');
+      if (!state.get('aiStreaming') && this.voice.input.mode !== 'wake') this.setStatus('IDLE');
     });
     bus.on(EV.STT_PARTIAL, ({ text }) => {
       const el = $('interim');
@@ -674,12 +698,15 @@ class AuraApp {
       // does not bury the UI in warnings.
       if (quiet) { this.log(message, 'warn'); return; }
       this.toast(fatal ? 'error' : 'warn', message);
-      if (fatal) { $('btn-mic').classList.remove('live'); $('dock-mic').classList.remove('live'); }
+      if (fatal) { $('btn-mic')?.classList.remove('live'); $('dock-mic')?.classList.remove('live'); }
     });
     bus.on(EV.WAKE_WORD, ({ command, matched, source }) => {
+      if (this._wakeGreetingActive) return;
       this.audio.sfx('confirm');
       this.toast('success', `🎙 Wake word "${matched || 'AURA'}" detected!`);
       bus.emit(EV.AVATAR_EMOTION, { emotion: 'surprised' });
+      const badge = $('wake-status-badge');
+      if (badge) { badge.textContent = 'DETECTED'; badge.className = 'badge success'; }
 
       const cleanCmd = (command || '').trim();
       if (cleanCmd && cleanCmd.length > 1) {
@@ -700,40 +727,51 @@ class AuraApp {
 
         // Speak greeting
         const emotion = greet.includes('Commander') ? 'questioning' : 'happy';
-        this.voice.output.speak(greet, { emotion });
+        this._wakeGreetingActive = true;
 
-        // Once greeting finishes, switch to active command listening
-        const onGreetingDone = () => {
-          bus.off(EV.TTS_END, onGreetingDone);
+        // startCommandMode: called after greeting TTS ends (or immediately if TTS disabled)
+        const startCommandMode = () => {
+          this._wakeGreetingActive = false;
           this.voice.input.start('command');
-
           // Auto-revert to wake listening if nothing heard after 8 seconds
           clearTimeout(this._wakePromptTimer);
           this._wakePromptTimer = setTimeout(() => {
+            this._wakePromptTimer = null;
             if (config.get('wakeWordEnabled') && this.voice.input.mode === 'command' && !state.get('aiStreaming')) {
               this.voice.input.start('wake');
             }
           }, 8000);
         };
-        bus.on(EV.TTS_END, onGreetingDone);
+
+        const ttsEnabled = config.get('ttsEnabled') && this.voice.output.supported;
+        if (ttsEnabled) {
+          this.voice.output.speak(greet, { emotion });
+          // Use once() to avoid handler leaks if TTS fires or fails multiple times
+          bus.once(EV.TTS_END, startCommandMode);
+        } else {
+          // TTS disabled — switch to command mode immediately after brief pause
+          setTimeout(startCommandMode, 300);
+        }
       }
     });
 
     bus.on(EV.TTS_START, () => { this.setStatus('SPEAKING'); $('status-pill').classList.add('speaking');
       $('btn-interrupt').hidden = false;
-      // Half-duplex is owned by SpeechInput itself (it subscribes to
-      // TTS_START/END), so every TTS source is covered — including gesture
-      // greetings and wake-word replies that never pass through main.js.
     });
     bus.on(EV.TTS_END, () => {
       $('status-pill').classList.remove('speaking');
       $('btn-interrupt').hidden = true;
       if (!state.get('aiStreaming') && !state.get('sttActive')) this.setStatus('IDLE');
 
+      // Do NOT interrupt if greeting is being spoken or prompt command window is active
+      if (this._wakeGreetingActive || this._wakePromptTimer) {
+        return;
+      }
+
       // Seamlessly resume wake-word listening after TTS ends
       if (config.get('wakeWordEnabled') && !state.get('aiStreaming')) {
         setTimeout(() => {
-          if (config.get('wakeWordEnabled') && !state.get('aiStreaming') && !this.voice.output.speaking) {
+          if (config.get('wakeWordEnabled') && !state.get('aiStreaming') && !this.voice.output.speaking && !this._wakePromptTimer) {
             this.voice.input.start('wake');
           }
         }, 500);
@@ -860,6 +898,7 @@ class AuraApp {
     $('btn-send').addEventListener('click', () => this.sendFromInput());
     $('btn-mic').addEventListener('click', () => this.toggleMic());
     $('dock-mic').addEventListener('click', () => this.toggleMic());
+    $('dock-wake')?.addEventListener('click', () => this.toggleWakeWord());
     $('dock-speak').addEventListener('click', () => this.toggleVoiceOutput());
     $('btn-stop').addEventListener('click', () => { this.ai.stop('user'); this.audio.sfx('click'); });
     $('btn-continue').addEventListener('click', () => { this.ai.continue(); this.audio.sfx('click'); });
@@ -2241,13 +2280,20 @@ class AuraApp {
     $('fx-canvas').style.display = config.get('particles') ? '' : 'none';
     $('stat-core').textContent = this.ai.providerLabel.replace(' (local)', '');
     $('composer-hint').textContent = this.ai.providerLabel;
-    if (config.get('wakeWordEnabled')) this.setWakeWord(true);
+    if (config.get('wakeWordEnabled')) {
+      this.setWakeWord(true);
+    } else {
+      $('dock-wake')?.classList.remove('active', 'live');
+    }
   }
 
   syncToggles() {
     const on = config.get('ttsEnabled');
     $('dock-speak').classList.toggle('muted', !on);
     $('dock-speak').querySelector('.dock-ico').textContent = on ? '🔊' : '🔇';
+    const wakeOn = !!config.get('wakeWordEnabled');
+    $('dock-wake')?.classList.toggle('active', wakeOn);
+    if (!wakeOn) $('dock-wake')?.classList.remove('live');
   }
 
   /* ══════════════════ UI FACADE (used by plugins/gestures) ══════════════════ */
@@ -3458,9 +3504,14 @@ class AuraApp {
    */
   setWakeWord(on) {
     if (!on) {
-      this.voice.input.stop();
+      if (this.voice.input.mode === 'wake') {
+        this.voice.input.stop();
+      }
       config.set('wakeWordEnabled', false);
       if ($('set-wake')) $('set-wake').checked = false;
+      $('dock-wake')?.classList.remove('active', 'live');
+      const badge = $('wake-status-badge');
+      if (badge) { badge.textContent = 'OFF'; badge.className = 'badge'; }
       state.set({ wakeWordActive: false });
       return 'Wake word listening disabled.';
     }
@@ -3468,6 +3519,7 @@ class AuraApp {
     if (!this.voice.input.supported) {
       config.set('wakeWordEnabled', false);
       if ($('set-wake')) $('set-wake').checked = false;
+      $('dock-wake')?.classList.remove('active', 'live');
       const m = this.voice.input.unsupportedReason;
       this.toast('error', m);
       return `⚠ ${m}`;
@@ -3475,12 +3527,20 @@ class AuraApp {
 
     config.set('wakeWordEnabled', true);
     if ($('set-wake')) $('set-wake').checked = true;
+    $('dock-wake')?.classList.add('active');
+    const badge = $('wake-status-badge');
+    if (badge) { badge.textContent = 'READY'; badge.className = 'badge active'; }
     state.set({ wakeWordActive: true });
 
     this.voice.input.start('wake');
-    const words = config.get('wakeWord') || 'aura, nova';
-    this.toast('info', `🎙 Multi-wake-word active: say "${words}" or "hey aura" anytime`);
+    const words = config.get('wakeWord') || 'aura, nova, jarvis, computer';
+    this.toast('info', `🎙 Continuous wake word active: say "${words}" anytime`);
     return `Multi-wake-word active — listening for "${words}".`;
+  }
+
+  toggleWakeWord() {
+    const cur = !!config.get('wakeWordEnabled');
+    return this.setWakeWord(!cur);
   }
 
   /** Show exactly why camera/mic are unavailable, with the fix. */

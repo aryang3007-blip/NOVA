@@ -124,6 +124,9 @@
     <button id="dock-mic" class="dock-btn accent" data-flag="panel.mic" title="Toggle microphone (Space)" aria-label="Toggle microphone">
       <span class="dock-ico">🎙</span><span class="dock-lbl">MIC</span>
     </button>
+    <button id="dock-wake" class="dock-btn" data-flag="panel.wake" title="Continuous Wake Word Detection ('Hey Aura', 'Nova', 'Jarvis')" aria-label="Toggle wake word detection">
+      <span class="dock-ico">👂</span><span class="dock-lbl">WAKE</span>
+    </button>
     <button id="dock-speak" class="dock-btn" data-flag="panel.voice" title="Toggle voice output (M)" aria-label="Toggle voice output">
       <span class="dock-ico">🔊</span><span class="dock-lbl">VOICE</span>
     </button>
@@ -617,7 +620,7 @@
           </select></label>
         <label class="switch block"><input type="checkbox" id="set-autosend"><span></span>Auto-send when I stop talking</label>
         <label class="field"><span>Commander Greeting</span><input id="set-commander-greeting" type="text" value="Yes, Commander?"></label>
-        <label class="switch block"><input type="checkbox" id="set-wake"><span></span>Continuous Wake Word Detection</label>
+        <label class="switch block"><input type="checkbox" id="set-wake"><span></span>Continuous Wake Word Detection <span id="wake-status-badge" class="badge" style="margin-left: 8px; font-size: 11px; padding: 2px 8px;">OFF</span></label>
         
         <div class="wakeword-manager">
           <label class="field"><span>Wake Word Presets</span>

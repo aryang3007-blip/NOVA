@@ -69,6 +69,7 @@ const DEFAULTS = {
   sttContinuous: true,
   wakeWordEnabled: false,
   wakeWord: 'aura, hey aura, nova, hey nova, jarvis, computer',
+  wakeWords: ['aura', 'hey aura', 'nova', 'hey nova', 'jarvis', 'hey jarvis', 'computer', 'assistant'],
   autoSendOnFinal: true,
   commanderGreeting: 'Yes, Commander?',
   commanderGreetingTone: 'questioning',

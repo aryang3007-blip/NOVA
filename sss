@@ -1,0 +1,247 @@
+[1mdiff --git a/aura/index.html b/aura/index.html[m
+[1mindex 74788b5..b6f3c2e 100644[m
+[1m--- a/aura/index.html[m
+[1m+++ b/aura/index.html[m
+[36m@@ -124,6 +124,9 @@[m
+     <button id="dock-mic" class="dock-btn accent" data-flag="panel.mic" title="Toggle microphone (Space)" aria-label="Toggle microphone">[m
+       <span class="dock-ico">🎙</span><span class="dock-lbl">MIC</span>[m
+     </button>[m
+[32m+[m[32m    <button id="dock-wake" class="dock-btn" data-flag="panel.wake" title="Continuous Wake Word Detection ('Hey Aura', 'Nova', 'Jarvis')" aria-label="Toggle wake word detection">[m
+[32m+[m[32m      <span class="dock-ico">👂</span><span class="dock-lbl">WAKE</span>[m
+[32m+[m[32m    </button>[m
+     <button id="dock-speak" class="dock-btn" data-flag="panel.voice" title="Toggle voice output (M)" aria-label="Toggle voice output">[m
+       <span class="dock-ico">🔊</span><span class="dock-lbl">VOICE</span>[m
+     </button>[m
+[36m@@ -617,7 +620,7 @@[m
+           </select></label>[m
+         <label class="switch block"><input type="checkbox" id="set-autosend"><span></span>Auto-send when I stop talking</label>[m
+         <label class="field"><span>Commander Greeting</span><input id="set-commander-greeting" type="text" value="Yes, Commander?"></label>[m
+[31m-        <label class="switch block"><input type="checkbox" id="set-wake"><span></span>Continuous Wake Word Detection</label>[m
+[32m+[m[32m        <label class="switch block"><input type="checkbox" id="set-wake"><span></span>Continuous Wake Word Detection <span id="wake-status-badge" class="badge" style="margin-left: 8px; font-size: 11px; padding: 2px 8px;">OFF</span></label>[m
+         [m
+         <div class="wakeword-manager">[m
+           <label class="field"><span>Wake Word Presets</span>[m
+[1mdiff --git a/aura/js/main.js b/aura/js/main.js[m
+[1mindex db8feb8..f3d2905 100644[m
+[1m--- a/aura/js/main.js[m
+[1m+++ b/aura/js/main.js[m
+[36m@@ -338,6 +338,22 @@[m [mclass AuraApp {[m
+     this.log(`Metrics: ${this.metrics.sourceLabel}`, mSrc.source === 'host' ? 'ok' : 'warn');[m
+     await this.tick();[m
+ [m
+[32m+[m[32m    // ── SQLite wake phrases sync[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      const { persistenceClient } = await import('./core/persistence-client.js');[m
+[32m+[m[32m      const phrases = await persistenceClient.getWakePhrases();[m
+[32m+[m[32m      if (phrases && phrases.length) {[m
+[32m+[m[32m        state.set({ wakePhrases: phrases });[m
+[32m+[m[32m        const enabled = phrases.filter(p => p.enabled !== false).map(p => p.phrase || p.name);[m
+[32m+[m[32m        if (enabled.length) {[m
+[32m+[m[32m          const cur = config.get('wakeWords') || [];[m
+[32m+[m[32m          const combined = Array.from(new Set([...cur, ...enabled]));[m
+[32m+[m[32m          config.set('wakeWords', combined);[m
+[32m+[m[32m          config.set('wakeWord', combined.join(', '));[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[32m    } catch {}[m
+[32m+[m
+     this.buildUI();[m
+     this.wireEvents();[m
+     this.wireDOM();[m
+[36m@@ -602,19 +618,27 @@[m [mclass AuraApp {[m
+     bus.on(EV.AI_MEMORY_UPDATED, ({ count }) => { $('stat-mem').textContent = count; });[m
+ [m
+     // ── voice[m
+[31m-    bus.on(EV.STT_START, () => {[m
+[32m+[m[32m    bus.on(EV.STT_START, ({ mode } = {}) => {[m
+       this.setStatus('LISTENING');[m
+[31m-      $('btn-mic').classList.add('live');[m
+[31m-      $('dock-mic').classList.add('live');[m
+[31m-      $('status-pill').classList.add('live');[m
+[31m-      this.audio.sfx('listen');[m
+[31m-    });[m
+[31m-    bus.on(EV.STT_END, () => {[m
+[31m-      $('btn-mic').classList.remove('live');[m
+[31m-      $('dock-mic').classList.remove('live');[m
+[31m-      $('status-pill').classList.remove('live');[m
+[32m+[m[32m      if (mode === 'wake') {[m
+[32m+[m[32m        $('dock-wake')?.classList.add('live');[m
+[32m+[m[32m        const badge = $('wake-status-badge');[m
+[32m+[m[32m        if (badge) { badge.textContent = 'LISTENING'; badge.className = 'badge active'; }[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        $('btn-mic')?.classList.add('live');[m
+[32m+[m[32m        $('dock-mic')?.classList.add('live');[m
+[32m+[m[32m        $('status-pill')?.classList.add('live');[m
+[32m+[m[32m        this.audio.sfx('listen');[m
+[32m+[m[32m      }[m
+[32m+[m[32m    });[m
+[32m+[m[32m    bus.on(EV.STT_END, ({ mode } = {}) => {[m
+[32m+[m[32m      if (mode !== 'wake') {[m
+[32m+[m[32m        $('btn-mic')?.classList.remove('live');[m
+[32m+[m[32m        $('dock-mic')?.classList.remove('live');[m
+[32m+[m[32m        $('status-pill')?.classList.remove('live');[m
+[32m+[m[32m      }[m
+       $('interim').hidden = true;[m
+[31m-      if (!state.get('aiStreaming')) this.setStatus('IDLE');[m
+[32m+[m[32m      if (!state.get('aiStreaming') && this.voice.input.mode !== 'wake') this.setStatus('IDLE');[m
+     });[m
+     bus.on(EV.STT_PARTIAL, ({ text }) => {[m
+       const el = $('interim');[m
+[36m@@ -674,12 +698,15 @@[m [mclass AuraApp {[m
+       // does not bury the UI in warnings.[m
+       if (quiet) { this.log(message, 'warn'); return; }[m
+       this.toast(fatal ? 'error' : 'warn', message);[m
+[31m-      if (fatal) { $('btn-mic').classList.remove('live'); $('dock-mic').classList.remove('live'); }[m
+[32m+[m[32m      if (fatal) { $('btn-mic')?.classList.remove('live'); $('dock-mic')?.classList.remove('live'); }[m
+     });[m
+     bus.on(EV.WAKE_WORD, ({ command, matched, source }) => {[m
+[32m+[m[32m      if (this._wakeGreetingActive) return;[m
+       this.audio.sfx('confirm');[m
+       this.toast('success', `🎙 Wake word "${matched || 'AURA'}" detected!`);[m
+       bus.emit(EV.AVATAR_EMOTION, { emotion: 'surprised' });[m
+[32m+[m[32m      const badge = $('wake-status-badge');[m
+[32m+[m[32m      if (badge) { badge.textContent = 'DETECTED'; badge.className = 'badge success'; }[m
+ [m
+       const cleanCmd = (command || '').trim();[m
+       if (cleanCmd && cleanCmd.length > 1) {[m
+[36m@@ -700,40 +727,51 @@[m [mclass AuraApp {[m
+ [m
+         // Speak greeting[m
+         const emotion = greet.includes('Commander') ? 'questioning' : 'happy';[m
+[31m-        this.voice.output.speak(greet, { emotion });[m
+[32m+[m[32m        this._wakeGreetingActive = true;[m
+ [m
+[31m-        // Once greeting finishes, switch to active command listening[m
+[31m-        const onGreetingDone = () => {[m
+[31m-          bus.off(EV.TTS_END, onGreetingDone);[m
+[32m+[m[32m        // startCommandMode: called after greeting TTS ends (or immediately if TTS disabled)[m
+[32m+[m[32m        const startCommandMode = () => {[m
+[32m+[m[32m          this._wakeGreetingActive = false;[m
+           this.voice.input.start('command');[m
+[31m-[m
+           // Auto-revert to wake listening if nothing heard after 8 seconds[m
+           clearTimeout(this._wakePromptTimer);[m
+           this._wakePromptTimer = setTimeout(() => {[m
+[32m+[m[32m            this._wakePromptTimer = null;[m
+             if (config.get('wakeWordEnabled') && this.voice.input.mode === 'command' && !state.get('aiStreaming')) {[m
+               this.voice.input.start('wake');[m
+             }[m
+           }, 8000);[m
+         };[m
+[31m-        bus.on(EV.TTS_END, onGreetingDone);[m
+[32m+[m
+[32m+[m[32m        const ttsEnabled = config.get('ttsEnabled') && this.voice.output.supported;[m
+[32m+[m[32m        if (ttsEnabled) {[m
+[32m+[m[32m          this.voice.output.speak(greet, { emotion });[m
+[32m+[m[32m          // Use once() to avoid handler leaks if TTS fires or fails multiple times[m
+[32m+[m[32m          bus.once(EV.TTS_END, startCommandMode);[m
+[32m+[m[32m        } else {[m
+[32m+[m[32m          // TTS disabled — switch to command mode immediately after brief pause[m
+[32m+[m[32m          setTimeout(startCommandMode, 300);[m
+[32m+[m[32m        }[m
+       }[m
+     });[m
+ [m
+     bus.on(EV.TTS_START, () => { this.setStatus('SPEAKING'); $('status-pill').classList.add('speaking');[m
+       $('btn-interrupt').hidden = false;[m
+[31m-      // Half-duplex is owned by SpeechInput itself (it subscribes to[m
+[31m-      // TTS_START/END), so every TTS source is covered — including gesture[m
+[31m-      // greetings and wake-word replies that never pass through main.js.[m
+     });[m
+     bus.on(EV.TTS_END, () => {[m
+       $('status-pill').classList.remove('speaking');[m
+       $('btn-interrupt').hidden = true;[m
+       if (!state.get('aiStreaming') && !state.get('sttActive')) this.setStatus('IDLE');[m
+ [m
+[32m+[m[32m      // Do NOT interrupt if greeting is being spoken or prompt command window is active[m
+[32m+[m[32m      if (this._wakeGreetingActive || this._wakePromptTimer) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+       // Seamlessly resume wake-word listening after TTS ends[m
+       if (config.get('wakeWordEnabled') && !state.get('aiStreaming')) {[m
+         setTimeout(() => {[m
+[31m-          if (config.get('wakeWordEnabled') && !state.get('aiStreaming') && !this.voice.output.speaking) {[m
+[32m+[m[32m          if (config.get('wakeWordEnabled') && !state.get('aiStreaming') && !this.voice.output.speaking && !this._wakePromptTimer) {[m
+             this.voice.input.start('wake');[m
+           }[m
+         }, 500);[m
+[36m@@ -860,6 +898,7 @@[m [mclass AuraApp {[m
+     $('btn-send').addEventListener('click', () => this.sendFromInput());[m
+     $('btn-mic').addEventListener('click', () => this.toggleMic());[m
+     $('dock-mic').addEventListener('click', () => this.toggleMic());[m
+[32m+[m[32m    $('dock-wake')?.addEventListener('click', () => this.toggleWakeWord());[m
+     $('dock-speak').addEventListener('click', () => this.toggleVoiceOutput());[m
+     $('btn-stop').addEventListener('click', () => { this.ai.stop('user'); this.audio.sfx('click'); });[m
+     $('btn-continue').addEventListener('click', () => { this.ai.continue(); this.audio.sfx('click'); });[m
+[36m@@ -2241,13 +2280,20 @@[m [mclass AuraApp {[m
+     $('fx-canvas').style.display = config.get('particles') ? '' : 'none';[m
+     $('stat-core').textContent = this.ai.providerLabel.replace(' (local)', '');[m
+     $('composer-hint').textContent = this.ai.providerLabel;[m
+[31m-    if (config.get('wakeWordEnabled')) this.setWakeWord(true);[m
+[32m+[m[32m    if (config.get('wakeWordEnabled')) {[m
+[32m+[m[32m      this.setWakeWord(true);[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m      $('dock-wake')?.classList.remove('active', 'live');[m
+[32m+[m[32m    }[m
+   }[m
+ [m
+   syncToggles() {[m
+     const on = config.get('ttsEnabled');[m
+     $('dock-speak').classList.toggle('muted', !on);[m
+     $('dock-speak').querySelector('.dock-ico').textContent = on ? '🔊' : '🔇';[m
+[32m+[m[32m    const wakeOn = !!config.get('wakeWordEnabled');[m
+[32m+[m[32m    $('dock-wake')?.classList.toggle('active', wakeOn);[m
+[32m+[m[32m    if (!wakeOn) $('dock-wake')?.classList.remove('live');[m
+   }[m
+ [m
+   /* ══════════════════ UI FACADE (used by plugins/gestures) ══════════════════ */[m
+[36m@@ -3458,9 +3504,14 @@[m [mclass AuraApp {[m
+    */[m
+   setWakeWord(on) {[m
+     if (!on) {[m
+[31m-      this.voice.input.stop();[m
+[32m+[m[32m      if (this.voice.input.mode === 'wake') {[m
+[32m+[m[32m        this.voice.input.stop();[m
+[32m+[m[32m      }[m
+       config.set('wakeWordEnabled', false);[m
+       if ($('set-wake')) $('set-wake').checked = false;[m
+[32m+[m[32m      $('dock-wake')?.classList.remove('active', 'live');[m
+[32m+[m[32m      const badge = $('wake-status-badge');[m
+[32m+[m[32m      if (badge) { badge.textContent = 'OFF'; badge.className = 'badge'; }[m
+       state.set({ wakeWordActive: false });[m
+       return 'Wake word listening disabled.';[m
+     }[m
+[36m@@ -3468,6 +3519,7 @@[m [mclass AuraApp {[m
+     if (!this.voice.input.supported) {[m
+       config.set('wakeWordEnabled', false);[m
+       if ($('set-wake')) $('set-wake').checked = false;[m
+[32m+[m[32m      $('dock-wake')?.classList.remove('active', 'live');[m
+       const m = this.voice.input.unsupportedReason;[m
+       this.toast('error', m);[m
+       return `⚠ ${m}`;[m
+[36m@@ -3475,14 +3527,22 @@[m [mclass AuraApp {[m
+ [m
+     config.set('wakeWordEnabled', true);[m
+     if ($('set-wake')) $('set-wake').checked = true;[m
+[32m+[m[32m    $('dock-wake')?.classList.add('active');[m
+[32m+[m[32m    const badge = $('wake-status-badge');[m
+[32m+[m[32m    if (badge) { badge.textContent = 'READY'; badge.className = 'badge active'; }[m
+     state.set({ wakeWordActive: true });[m
+ [m
+     this.voice.input.start('wake');[m
+[31m-    const words = config.get('wakeWord') || 'aura, nova';[m
+[31m-    this.toast('info', `🎙 Multi-wake-word active: say "${words}" or "hey aura" anytime`);[m
+[32m+[m[32m    const words = config.get('wakeWord') || 'aura, nova, jarvis, computer';[m
+[32m+[m[32m    this.toast('info', `🎙 Continuous wake word active: say "${words}" anytime`);[m
+     return `Multi-wake-word active — listening for "${words}".`;[m
+   }[m
+ [m
+[32m+[m[32m  toggleWakeWord() {[m
+[32m+[m[32m    const cur = !!config.get('wakeWordEnabled');[m
+[32m+[m[32m    return this.setWakeWord(!cur);[m
+[32m+[m[32m  }[m
+[32m+[m
+   /** Show exactly why camera/mic are unavailable, with the fix. */[m
+   async runMediaDiagnostic() {[m
+     const cam = await this.vision.diagnose();[m

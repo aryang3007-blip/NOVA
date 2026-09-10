@@ -99,5 +99,43 @@ si._lastWakeTrigger = 0;
 chk('phonetically matches "ora what time is it"', si._checkWakeWord('ora what time is it') === true);
 chk('matched is "aura"', lastWake?.matched === 'aura');
 
+// Test 8: Phonetic variation "noah" matches "nova"
+lastWake = null;
+si._lastWakeTrigger = 0;
+chk('phonetically matches "noah open browser"', si._checkWakeWord('noah open browser') === true);
+chk('matched is "nova"', lastWake?.matched === 'nova');
+
+// Test 9: Interim with standalone wake word does not trigger prematurely
+lastWake = null;
+si._lastWakeTrigger = 0;
+chk('interim with standalone "hey nova" returns false (waits for full utterance)', si._checkWakeWord('hey nova', true) === false);
+chk('did not emit wake event during interim standalone', lastWake === null);
+
+// Test 10: Interim with full command triggers immediately
+lastWake = null;
+si._lastWakeTrigger = 0;
+chk('interim with attached command triggers', si._checkWakeWord('hey nova open calculator', true) === true);
+chk('matched is "hey nova"', lastWake?.matched === 'hey nova');
+chk('command is "open calculator"', lastWake?.command === 'open calculator');
+
+// Test 11: Command mode supports wake words
+si.mode = 'command';
+lastWake = null;
+si._lastWakeTrigger = 0;
+chk('detects wake phrase in command mode', si._checkWakeWord('hey aura open settings') === true);
+chk('command extracted in command mode', lastWake?.command === 'open settings');
+
+// Test 12: Lifecycle & timeout safety
+chk('has _armListeningTimeout method', typeof si._armListeningTimeout === 'function');
+si._armListeningTimeout();
+chk('_commandTimeout armed in command mode', si._commandTimeout !== null);
+si.stop();
+chk('_commandTimeout cleared on stop', si._commandTimeout === null);
+
+// Test 13: SQLite / state phrases included
+const { state } = await import('../js/core/state.js');
+state.set({ wakePhrases: [{ phrase: 'friday', enabled: true }] });
+chk('includes dynamic state phrase "friday"', si._getWakePhrases().includes('friday'));
+
 console.log(`\n  PASS ${pass}  FAIL ${fail}\n`);
 if (fail > 0) process.exit(1);

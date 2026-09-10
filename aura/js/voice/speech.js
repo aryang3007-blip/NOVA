@@ -150,7 +150,7 @@ export class SpeechInput {
     this.wantListening = false;
     this.mode = 'command';           // 'command' | 'wake'
     this.finalBuffer = '';
-    this.lastError = null;
+    this._commandTimeout = null;
     this._restartTimer = null;
     /** Text AURA most recently spoke — compared against transcripts. */
     this._selfSpoken = '';
@@ -176,13 +176,13 @@ export class SpeechInput {
         this.mute('tts');
       });
       bus.on(EV.TTS_END, () => {
-        this._spokeUntil = Date.now() + 900;
-        this.unmute(900);
-        setTimeout(() => { this._selfSpoken = ''; }, 4000);
+        this._spokeUntil = Date.now() + 350;
+        this.unmute(350);
+        setTimeout(() => { this._selfSpoken = ''; }, 3000);
       });
       bus.on(EV.TTS_INTERRUPT, () => {
-        this._spokeUntil = Date.now() + 400;
-        this.unmute(400);
+        this._spokeUntil = Date.now() + 250;
+        this.unmute(250);
       });
     }
   }
@@ -335,9 +335,7 @@ export class SpeechInput {
 
       if (interim) {
         bus.emit(EV.STT_PARTIAL, { text: interim.trim(), confidence });
-        if (this.mode === 'wake') {
-          this._checkWakeWord(interim, true);
-        }
+        this._checkWakeWord(interim, true);
       }
 
       if (final.trim()) {
@@ -346,11 +344,13 @@ export class SpeechInput {
           bus.emit('voice:echo-suppressed', { text });
           return;
         }
-        if (this.mode === 'wake') {
-          this._checkWakeWord(text, false);
-        } else {
-          this.finalBuffer = text;
-          bus.emit(EV.STT_FINAL, { text, confidence });
+        // Check for wake word in both wake mode and command mode
+        const wakeMatched = this._checkWakeWord(text, false);
+        if (!wakeMatched) {
+          if (this.mode === 'command') {
+            this.finalBuffer = text;
+            bus.emit(EV.STT_FINAL, { text, confidence });
+          }
         }
       }
     };
@@ -519,46 +519,79 @@ export class SpeechInput {
     try { r.start(); } catch {}
   }
 
+  /** Re-arm inactivity timeout in command mode */
+  _armListeningTimeout() {
+    if (this._commandTimeout) {
+      clearTimeout(this._commandTimeout);
+      this._commandTimeout = null;
+    }
+    if (this.mode === 'command') {
+      this._commandTimeout = setTimeout(() => {
+        if (this.listening && this.mode === 'command' && !this._sawResultThisSession) {
+          if (config.get('wakeWordEnabled')) {
+            this.start('wake');
+          }
+        }
+      }, 12000);
+    }
+  }
+
   /**
    * Multi-Wake-Word Parser & Matcher
    * Supports multiple wake words simultaneously (e.g. "aura, hey aura, nova, hey nova, jarvis, computer").
    * Evaluates both exact matches, word-boundary regexes, prefix commands, and phonetic fuzzy similarity.
    */
   _getWakePhrases() {
-    const raw = String(config.get('wakeWord') || 'aura, nova').toLowerCase();
-    const userPhrases = raw
-      .split(/[,;|]+/)
-      .map(s => s.trim().replace(/[^a-z0-9 ]/g, ''))
-      .filter(Boolean);
+    const rawWords = config.get('wakeWords');
+    let userPhrases = [];
+    if (Array.isArray(rawWords)) {
+      userPhrases = rawWords.map(s => String(s).trim().toLowerCase().replace(/[^a-z0-9 ]/g, '')).filter(Boolean);
+    }
+    const raw = String(config.get('wakeWord') || '').toLowerCase();
+    if (raw) {
+      const parts = raw.split(/[,;|]+/).map(s => s.trim().replace(/[^a-z0-9 ]/g, '')).filter(Boolean);
+      userPhrases.push(...parts);
+    }
+
+    const statePhrases = state.get('wakePhrases');
+    if (Array.isArray(statePhrases)) {
+      for (const p of statePhrases) {
+        const ph = String(p.phrase || p.name || '').trim().toLowerCase().replace(/[^a-z0-9 ]/g, '');
+        if (ph) userPhrases.push(ph);
+      }
+    }
 
     // Standard built-in default aliases that always work out of the box
     const defaults = [
-      'aura', 'hey aura', 'ok aura', 'hi aura', 'yo aura',
-      'nova', 'hey nova', 'ok nova', 'hi nova', 'yo nova',
-      'jarvis', 'hey jarvis',
-      'computer',
-      'assistant'
+      'aura', 'hey aura', 'ok aura', 'okay aura', 'hi aura', 'yo aura',
+      'nova', 'hey nova', 'ok nova', 'okay nova', 'hi nova', 'yo nova',
+      'jarvis', 'hey jarvis', 'ok jarvis', 'okay jarvis',
+      'computer', 'hey computer',
+      'assistant', 'hey assistant'
     ];
 
     // Combine unique phrases, sorted longest first so multi-word phrases match before single-word
-    const all = Array.from(new Set([...userPhrases, ...defaults]))
+    return Array.from(new Set([...userPhrases, ...defaults]))
       .filter(s => s.length >= 2)
       .sort((a, b) => b.length - a.length);
-
-    return all;
   }
 
   _checkWakeWord(rawText, isInterim = false) {
     if (!rawText) return false;
     const now = Date.now();
     // Cooldown prevents multiple triggers on the same utterance stream
-    if (this._lastWakeTrigger && (now - this._lastWakeTrigger < 2200)) {
+    if (this._lastWakeTrigger && (now - this._lastWakeTrigger < 2000)) {
       return false;
     }
 
     // Normalise text: lowercase, remove punctuation
     const text = String(rawText).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!text) return false;
+
+    // Debug logging — visible in browser DevTools console
+    if (this.mode === 'wake' || config.get('wakeWordEnabled')) {
+      console.debug(`[wake] ${isInterim ? '(interim)' : '(final)'} heard: "${text}"`);
+    }
 
     const phrases = this._getWakePhrases();
 
@@ -579,6 +612,12 @@ export class SpeechInput {
           after = after.replace(/^(can you|could you|please|tell me|hey|yo)\s+/i, '').trim();
         }
 
+        // If this is interim and there is no attached command yet, don't trigger greeting prematurely;
+        // let the recognizer finish the phrase or finalize with isFinal
+        if (isInterim && !after) {
+          return false;
+        }
+
         this._lastWakeTrigger = now;
         this._lastSuppressed = text;
         bus.emit(EV.WAKE_WORD, {
@@ -594,19 +633,24 @@ export class SpeechInput {
 
     // 2. Common acoustic/phonetic misrecognitions for core wake words
     const PHONETIC_ALIASES = {
-      aura: ['ora', 'ahra', 'awra', 'aurora', 'aroma', 'hora', 'laura', 'our a'],
-      nova: ['nora', 'noah', 'novah', 'noda', 'novak', 'dora'],
-      jarvis: ['service', 'harvest', 'travis', 'tarvis']
+      aura: ['ora', 'ahra', 'awra', 'aurora', 'aroma', 'hora', 'laura', 'our a', 'arrow', 'aora', 'oura', 'ira'],
+      nova: ['nora', 'noah', 'novah', 'noda', 'novak', 'dora', 'mova', 'noba', 'lola'],
+      jarvis: ['service', 'harvest', 'travis', 'tarvis', 'javis', 'jarvus'],
+      computer: ['computor', 'computar', 'commuter', 'producer']
     };
 
-    const words = text.split(/\s+/).filter(w => w.length >= 3);
+    const words = text.split(/\s+/).filter(w => w.length >= 2);
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
 
       // Check alias dictionaries
       for (const [target, aliases] of Object.entries(PHONETIC_ALIASES)) {
-        if (aliases.includes(w) || phoneticSimilarity(w, target) >= 0.76) {
+        const thresh = target.length <= 4 ? 0.74 : 0.76;
+        if (aliases.includes(w) || phoneticSimilarity(w, target) >= thresh) {
           const afterWords = words.slice(i + 1).join(' ').trim();
+          if (isInterim && !afterWords) {
+            return false;
+          }
           this._lastWakeTrigger = now;
           this._lastSuppressed = text;
           bus.emit(EV.WAKE_WORD, {
@@ -642,6 +686,10 @@ export class SpeechInput {
     this.recognition = this._create();
     try {
       this.recognition.start();
+      if (mode === 'wake') {
+        const phrases = this._getWakePhrases().slice(0, 8).join(', ');
+        console.info(`[wake] 🟢 Wake word detection ACTIVE — listening for: ${phrases}…`);
+      }
       return true;
     } catch (e) {
       // "already started" is benign
@@ -656,6 +704,10 @@ export class SpeechInput {
   stop() {
     this.wantListening = false;
     clearTimeout(this._restartTimer);
+    if (this._commandTimeout) {
+      clearTimeout(this._commandTimeout);
+      this._commandTimeout = null;
+    }
     if (this.recognition) { try { this.recognition.stop(); } catch {} }
     this.listening = false;
     state.set({ sttActive: false });
