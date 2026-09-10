@@ -430,6 +430,8 @@ export class PersistenceClient {
     } catch (e) {
       return { ok: false, error: String(e) };
     }
+  }
+
   /* ── WAKE PHRASES ─────────────────────────────────────────────────── */
 
   async getWakePhrases() {

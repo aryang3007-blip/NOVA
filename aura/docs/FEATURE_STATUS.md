@@ -89,7 +89,7 @@ Legend: 🟢 Working · 🟡 Partial (works with a stated caveat) · ⚪ Planned
 | Text-to-speech | 🟢 Working | `speechSynthesis` + markdown stripping + Chrome 15 s-cutoff workaround |
 | Incremental speech | 🟢 Working | Speaks each sentence as it streams — starts talking before generation finishes |
 | Viseme generation | 🟢 Working | Grapheme→viseme mapping, timing verified (4 visemes summing to exactly 500 ms) |
-| Wake word | 🟢 Working | Continuous recognition scanning for the trigger word; enable in Settings → Voice. Same browser caveat as STT |
+| Wake word | 🟢 Working | Dock WAKE button (👂) + status badge; custom phrases in Settings → Voice persist to SQLite (`wake_phrases`, synced on boot) and join the matcher; triggers on FINAL transcripts only (interims are partial); 900 ms anti-echo tail + 2200 ms cooldown unchanged; 30 multi-wake assertions |
 | Spoken commands | 🟢 Working | Wake word + command → deterministic slash command (`timer five minutes` → `/timer 300`); same router for typed and spoken; 68 interpreter assertions; device/phone phrases stay with the device router |
 | /screen by voice | 🟢 Working | `/screen` omni bar (⌘ + key or 🎙 mic) auto-classifies a prompt: ask / find / act (agent loop starts automatically, arm + per-step confirm unchanged) / share / stop / arm automation. "open the live screen and <task>" navigates there with the task preloaded |
 | Voice selection | 🟢 Working | `/voices` lists them; picker in Settings |

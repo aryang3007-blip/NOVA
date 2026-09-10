@@ -10,6 +10,7 @@
 import { bus, EV } from './core/bus.js';
 import { state } from './core/state.js';
 import { config } from './core/config.js';
+import { persistenceClient } from './core/persistence-client.js';
 import { plugins } from './core/plugins.js';
 import { AIEngine } from './ai/engine.js';
 import { SpeechInput, SpeechOutput, stripMarkdownForSpeech } from './voice/speech.js';
@@ -648,6 +649,9 @@ class AuraApp {
     });
     bus.on(EV.STT_FINAL, ({ text }) => {
       $('interim').hidden = true;
+      // A final means the user spoke — the wake prompt window is over.
+      clearTimeout(this._wakePromptTimer);
+      this._wakePromptTimer = null;
       if (!text.trim()) return;
       if (config.get('autoSendOnFinal')) {
         this.voice.input.stop();
@@ -1138,6 +1142,12 @@ class AuraApp {
         config.set('wakeWords', next);
         config.set('wakeWord', next.join(', '));
         this._renderWakeTags();
+        // Mirror to SQLite (same deterministic id the server falls back to),
+        // so custom phrases survive profile wipes and sync on next boot.
+        // Fire-and-forget: the client never throws and no-ops offline.
+        void persistenceClient.saveWakePhrase({
+          id: trimmed.replace(/\s+/g, '_'), name: trimmed, phrase: trimmed, enabled: true,
+        });
         this.toast('ok', `Added wake word: "${trimmed}"`);
       }
     };
@@ -1163,6 +1173,8 @@ class AuraApp {
       config.set('wakeWords', next);
       config.set('wakeWord', next.join(', '));
       this._renderWakeTags();
+      // Mirror the removal to SQLite so the phrase does not resurrect on boot.
+      if (removed) void persistenceClient.deleteWakePhrase(String(removed).replace(/\s+/g, '_'));
       this.toast('info', `Removed wake word: "${removed}"`);
     });
     selWakePresets?.addEventListener('change', (e) => {
@@ -3484,7 +3496,12 @@ class AuraApp {
     }
     this.voice.output.cancel('mic');
     const on = await this.voice.input.toggle('command');
-    if (!on) this.setStatus('IDLE');
+    if (!on) {
+      // User hung up: do not let a pending prompt timer re-open the mic.
+      clearTimeout(this._wakePromptTimer);
+      this._wakePromptTimer = null;
+      this.setStatus('IDLE');
+    }
   }
 
   toggleVoiceOutput() {
@@ -3504,6 +3521,8 @@ class AuraApp {
    */
   setWakeWord(on) {
     if (!on) {
+      clearTimeout(this._wakePromptTimer);
+      this._wakePromptTimer = null;
       if (this.voice.input.mode === 'wake') {
         this.voice.input.stop();
       }

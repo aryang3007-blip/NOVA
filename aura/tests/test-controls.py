@@ -47,7 +47,7 @@ def S(t):
 
 S("REGISTRY DEFAULTS — everything ON, core protected")
 defs = ff.defs()
-rec("35 registrable features/pages/pipelines", len(defs) == 35, str(len(defs)))
+rec("36 registrable features/pages/pipelines", len(defs) == 36, str(len(defs)))
 rec("all default to ON", all(d["on"] for d in defs))
 rec("controls page + chat panel locked", {"page.controls", "panel.chat"} <= set(ff.counts()["protected"]))
 rec("every flag id matches the validated key pattern", all(__import__("re").match(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$", d["id"]) for d in defs))
@@ -66,8 +66,8 @@ rec("whole store corrupt → everything ON", all(ff.is_on(d["id"]) for d in defs
 S("API — /api/db/flags")
 api_handler = persistence_api.PersistenceAPIHandler
 r = api_handler.handle_get("/api/db/flags", {})
-rec("GET returns ok + 35 flags", r[0].get("ok") and len(r[0]["flags"]) == 35)
-rec("counts present", r[0]["counts"]["total"] == 35 and r[0]["counts"]["off"] == 0)
+rec("GET returns ok + 36 flags", r[0].get("ok") and len(r[0]["flags"]) == 36)
+rec("counts present", r[0]["counts"]["total"] == 36 and r[0]["counts"]["off"] == 0)
 
 r = api_handler.handle_post("/api/db/flags", {"id": "page.phone", "enabled": False})
 rec("POST turns a page OFF", r[0]["ok"] and ff.is_on("page.phone") is False)

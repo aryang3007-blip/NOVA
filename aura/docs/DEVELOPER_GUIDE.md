@@ -237,8 +237,19 @@ interpretSpokenCommand('what is my name');           // → null (conversation)
 
 - **Same call anywhere.** Typed, wake-word, and STT input all funnel through
   `main.js → maybeFeatureIntent()`, so a spoken command executes exactly like
-  typing the slash command — no model, no offline drift (`61` assertions in
-  `tests/test-command-interpreter.mjs`).
+  typing the slash command — no model, no offline drift (`68` assertions in
+  `tests/test-command-interpreter.mjs`, `30` in `tests/test-multi-wake.mjs`).
+- **Wake detection is final-only.** `SpeechInput` scans FINAL transcripts in
+  every mode (wake + command); interim results only drive the live caption.
+  Acting on interims executes half a command and double-fires in command
+  mode — do not re-add an interim wake check without solving both.
+- **Custom phrases persist.** Settings → Voice tag edits write `config`
+  (instant) and mirror to SQLite `/api/db/wake` (durable); boot merges
+  enabled rows back into `wakeWords` + `state.wakePhrases`, which
+  `_getWakePhrases()` combines with the built-in defaults.
+- **Anti-feedback margins are load-bearing.** 900 ms TTS tail, 400 ms
+  interrupt tail, 2200 ms wake cooldown, ≥0.6 echo-overlap rejection —
+  retune only with measurements from real hardware.
 - **Conservative by design.** Only high-precision patterns match; questions
   and greetings return `null` and go to the AI. New phrases should be added
   with a test in the same file.

@@ -32,6 +32,7 @@ const LABELS = {
   'panel.style': 'Wardrobe',
   'panel.mic': 'Microphone',
   'panel.voice': 'Voice output',
+  'panel.wake': 'Wake word button',
   'apps.pptx': 'PPT Builder',
   'apps.docx': 'Word Builder',
   'apps.xlsx': 'Workbook Builder',

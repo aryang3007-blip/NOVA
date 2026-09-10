@@ -175,14 +175,17 @@ export class SpeechInput {
         this._selfSpoken = text || '';
         this.mute('tts');
       });
+      // 900ms acoustic tail: Bluetooth/speaker latency means sound is still in
+      // the air when TTS_END fires. Do not shorten without measuring on real
+      // hardware — this is the "it hears its own Hello Commander" guard.
       bus.on(EV.TTS_END, () => {
-        this._spokeUntil = Date.now() + 350;
-        this.unmute(350);
-        setTimeout(() => { this._selfSpoken = ''; }, 3000);
+        this._spokeUntil = Date.now() + 900;
+        this.unmute(900);
+        setTimeout(() => { this._selfSpoken = ''; }, 4000);
       });
       bus.on(EV.TTS_INTERRUPT, () => {
-        this._spokeUntil = Date.now() + 250;
-        this.unmute(250);
+        this._spokeUntil = Date.now() + 400;
+        this.unmute(400);
       });
     }
   }
@@ -333,9 +336,13 @@ export class SpeechInput {
         return;
       }
 
+      // Interim results only drive the live transcript. Wake words trigger on
+      // FINAL transcripts only: interims are partial by definition ("hey aura
+      // open" fires before the rest arrives), so acting on them executes half
+      // a command — and in command mode it double-fires (WAKE_WORD on the
+      // interim, then STT_FINAL on the completed utterance).
       if (interim) {
         bus.emit(EV.STT_PARTIAL, { text: interim.trim(), confidence });
-        this._checkWakeWord(interim, true);
       }
 
       if (final.trim()) {
@@ -580,18 +587,13 @@ export class SpeechInput {
     if (!rawText) return false;
     const now = Date.now();
     // Cooldown prevents multiple triggers on the same utterance stream
-    if (this._lastWakeTrigger && (now - this._lastWakeTrigger < 2000)) {
+    if (this._lastWakeTrigger && (now - this._lastWakeTrigger < 2200)) {
       return false;
     }
 
     // Normalise text: lowercase, remove punctuation
     const text = String(rawText).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!text) return false;
-
-    // Debug logging — visible in browser DevTools console
-    if (this.mode === 'wake' || config.get('wakeWordEnabled')) {
-      console.debug(`[wake] ${isInterim ? '(interim)' : '(final)'} heard: "${text}"`);
-    }
 
     const phrases = this._getWakePhrases();
 

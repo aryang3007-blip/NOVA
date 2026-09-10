@@ -78,6 +78,9 @@ FLAG_DEFS = [
     {"id": "panel.voice", "kind": "panel", "default": True, "protected": False,
      "label": "Voice output toggle",
      "desc": "The dock speak button (voice output entry)."},
+    {"id": "panel.wake", "kind": "panel", "default": True, "protected": False,
+     "label": "Wake word toggle",
+     "desc": "The dock wake button (continuous wake-word detection entry)."},
 
     # ── SETTINGS TABS ────────────────────────────────────────────────────
     {"id": "ui.ai", "kind": "tab", "default": True, "protected": False,

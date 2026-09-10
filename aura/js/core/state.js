@@ -78,6 +78,7 @@ export const state = new Store({
   ttsSupported: false,
   ttsSpeaking: false,
   wakeWordActive: false,
+  wakePhrases: [],
   micPermission: 'unknown',
   // vision
   cameraActive: false,

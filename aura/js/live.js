@@ -754,6 +754,17 @@ function wireVoice() {
     const t = String(text || '').trim();
     if (t) handleOmniPrompt(t);
   });
+  // Command-mode finals containing a wake word arrive as WAKE_WORD (with the
+  // command already split out) instead of STT_FINAL — route those too, or a
+  // spoken "hey aura, find the Save button" would be swallowed silently.
+  bus.on(EV.WAKE_WORD, ({ command }) => {
+    const c = String(command || '').trim();
+    if (c) {
+      const omni = $('omni');
+      if (omni) omni.value = c;
+      handleOmniPrompt(c);
+    }
+  });
 }
 
 /* ── status ─────────────────────────────────────────────────────────── */
